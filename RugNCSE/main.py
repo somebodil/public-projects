@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 from dataclasses import dataclass
 from typing import Union, List, Dict
 
@@ -71,10 +72,28 @@ def main():
 
     def preprocess_function(examples):
         total = len(examples[column_name])  # Total len
-        tokenized = tokenizer(examples[column_name], truncation=True, max_length=training_args.max_seq_length)
+
+        sentences = examples[column_name] + examples[column_name]
+        for i in range(2, training_args.num_augmentation):
+            sentences += examples[column_name]
+
+        tokenized = tokenizer(sentences, truncation=True, max_length=training_args.max_seq_length)
+
         result = {}
         for key in tokenized:  # Wrap
-            result[key] = [[tokenized[key][i]] for i in range(total)]
+            result[key] = []
+            for i in range(total):
+                li = []
+                for j in range(training_args.num_augmentation):
+                    li_item = tokenized[key][i + j * total]
+                    if j > 1:  # Anchor: j=0, Positive example: j=1
+                        li_item = tokenized[key][i + j * total][1:-1]
+                        random.shuffle(li_item)
+                        li_item.insert(0, tokenized[key][i + j * total][0])
+                        li_item.append(tokenized[key][i + j * total][-1])
+
+                    li.append(li_item)
+                result[key].append(li)
         return result
 
     train_dataset = datasets.map(
@@ -97,6 +116,7 @@ def main():
                 temperature=training_args.temperature,
                 pooler_type=training_args.pooler_type,
                 mlp_only_train=training_args.mlp_only_train,
+                num_augmentation=training_args.num_augmentation,
             )
         elif 'bert' in training_args.model_name_or_path:
             return BertForCL.from_pretrained(
@@ -105,6 +125,7 @@ def main():
                 temperature=training_args.temperature,
                 pooler_type=training_args.pooler_type,
                 mlp_only_train=training_args.mlp_only_train,
+                num_augmentation=training_args.num_augmentation,
             )
         else:
             raise NotImplementedError
@@ -163,72 +184,83 @@ def main():
         callbacks=[EarlyStoppingCallback(early_stopping_patience=5)]
     )
 
-    # Callback code, to let ray-tune run trainer evaluate for test-set at the end of the trial
-    class EndOfTrialCallback(Callback):
-        def on_trial_complete(self, iteration: int, trials: List["Trial"], trial: "Trial", **info):
-            # Overwrite last_result as best_result for Reporter
-            trial.last_result['objective'] = trial.metric_analysis["objective"][training_args.metric_direction[:3]]
-            trial.last_result['eval_accuracy'] = trial.metric_analysis["objective"][training_args.metric_direction[:3]]
+    if not training_args.use_ray:
+        trainer.train()
 
-            # Save best model val-dataset accuracy
-            with open(trial.logdir + os.sep + "trial_best_model_val_result.txt", "w") as fp:
-                # HF Trainer provided metric from "compute_objective" is saved always as "objective"
-                fp.write(str(trial.metric_analysis["objective"][training_args.metric_direction[:3]]))
+    else:
+        # Init
+        ray.init()
 
-            # Run and save best model for test-set accuracy
-            checkpoints_dir = None
-            for root, dirs, files in os.walk(trial.logdir):
-                for directory in dirs:
-                    if directory == f"run-{trial.trial_id}":
-                        checkpoints_dir = trial.logdir + os.sep + directory
+        # Callback code, to let ray-tune run trainer evaluate for test-set at the end of the trial
+        class EndOfTrialCallback(Callback):
+            def on_trial_complete(self, iteration: int, trials: List["Trial"], trial: "Trial", **info):
+                # Overwrite last_result as best_result for Reporter
+                trial.last_result['objective'] = trial.metric_analysis["objective"][training_args.metric_direction[:3]]
+                trial.last_result['eval_accuracy'] = trial.metric_analysis["objective"][
+                    training_args.metric_direction[:3]]
 
-            best_model_checkpoint = None
-            if checkpoints_dir:
-                last_checkpoint = sorted(
-                    os.listdir(checkpoints_dir),
-                    key=lambda dirname: int(dirname.split('-')[1])
-                )[-1]
+                # Save best model val-dataset accuracy
+                with open(trial.logdir + os.sep + "trial_best_model_val_result.txt", "w") as fp:
+                    # HF Trainer provided metric from "compute_objective" is saved always as "objective"
+                    fp.write(str(trial.metric_analysis["objective"][training_args.metric_direction[:3]]))
 
-                trainer_state_path = checkpoints_dir + os.sep + last_checkpoint + os.sep + "trainer_state.json"
-                with open(trainer_state_path) as fp:
-                    trainer_state = json.load(fp)
-                    best_model_checkpoint_tmp = trainer_state['best_model_checkpoint']
-                    if "./" == best_model_checkpoint_tmp[:2]:
-                        best_model_checkpoint_tmp = best_model_checkpoint_tmp[2:]
+                # Run and save best model for test-set accuracy
+                checkpoints_dir = None
+                for root, dirs, files in os.walk(trial.logdir):
+                    for directory in dirs:
+                        if directory == f"run-{trial.trial_id}":
+                            checkpoints_dir = trial.logdir + os.sep + directory
 
-                    best_model_checkpoint = trial.logdir + os.sep + best_model_checkpoint_tmp
+                best_model_checkpoint = None
+                if checkpoints_dir:
+                    last_checkpoint = sorted(
+                        os.listdir(checkpoints_dir),
+                        key=lambda dirname: int(dirname.split('-')[1])
+                    )[-1]
 
-            if best_model_checkpoint:
-                local_trainer = CLTrainer(
-                    model=model_init_impl(best_model_checkpoint),
-                    args=training_args,
-                    data_collator=DataCollatorWithPadding(tokenizer),
-                    callbacks=[EarlyStoppingCallback(early_stopping_patience=5)]
-                )
+                    trainer_state_path = checkpoints_dir + os.sep + last_checkpoint + os.sep + "trainer_state.json"
+                    with open(trainer_state_path) as fp:
+                        trainer_state = json.load(fp)
+                        best_model_checkpoint_tmp = trainer_state['best_model_checkpoint']
+                        if "./" == best_model_checkpoint_tmp[:2]:
+                            best_model_checkpoint_tmp = best_model_checkpoint_tmp[2:]
 
-                with open(trial.logdir + os.sep + "trial_best_model_test_result.txt", "w") as fp:
-                    fp.write(str(format_senteval_results(local_trainer.evaluate(while_training=False))))
+                        best_model_checkpoint = trial.logdir + os.sep + best_model_checkpoint_tmp
 
-    best_run = trainer.hyperparameter_search(
-        backend="ray",
-        hp_space=lambda _: {
-            "seed": tune.choice(training_args.tune_choice_seed),
-        },
-        compute_objective=lambda metrics: metrics[training_args.metric_for_best_model],
-        n_trials=training_args.num_samples,
-        direction=training_args.metric_direction,
-        resources_per_trial={"cpu": training_args.cpus_per_trial, "gpu": training_args.gpus_per_trial},
-        local_dir="./ray_results/",
-        search_alg=BasicVariantGenerator(max_concurrent=training_args.max_concurrent_trials, constant_grid_search=True),
-        scheduler=FIFOScheduler(),
-        progress_reporter=CLIReporter(metric_columns=["eval_loss", training_args.metric_for_best_model]),
-        log_to_file=True,
-        callbacks=[EndOfTrialCallback()]
-    )
+                if best_model_checkpoint:
+                    local_trainer = CLTrainer(
+                        model=model_init_impl(best_model_checkpoint),
+                        args=training_args,
+                        data_collator=DataCollatorWithPadding(tokenizer),
+                        callbacks=[EarlyStoppingCallback(early_stopping_patience=5)]
+                    )
 
-    logger.info(f"best_run.run_id/best_run.hyperparameters: [{best_run.run_id}/{best_run.hyperparameters}]")
+                    with open(trial.logdir + os.sep + "trial_best_model_test_result.txt", "w") as fp:
+                        fp.write(str(format_senteval_results(local_trainer.evaluate(while_training=False))))
+
+        best_run = trainer.hyperparameter_search(
+            backend="ray",
+            hp_space=lambda _: {
+                "seed": tune.choice(training_args.tune_choice_seed),
+                "learning_rate": tune.choice(training_args.tune_choice_learning_rate),
+            },
+            compute_objective=lambda metrics: metrics[training_args.metric_for_best_model],
+            n_trials=training_args.num_samples,
+            direction=training_args.metric_direction,
+            resources_per_trial={"cpu": training_args.cpus_per_trial, "gpu": training_args.gpus_per_trial},
+            local_dir="./ray_results/",
+            search_alg=BasicVariantGenerator(
+                max_concurrent=training_args.max_concurrent_trials,
+                constant_grid_search=True
+            ),
+            scheduler=FIFOScheduler(),
+            progress_reporter=CLIReporter(metric_columns=["eval_loss", training_args.metric_for_best_model]),
+            log_to_file=True,
+            callbacks=[EndOfTrialCallback()]
+        )
+
+        logger.info(f"best_run.run_id/best_run.hyperparameters: [{best_run.run_id}/{best_run.hyperparameters}]")
 
 
 if __name__ == '__main__':
-    ray.init()
     main()

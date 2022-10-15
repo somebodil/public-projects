@@ -86,12 +86,7 @@ def cl_forward(
 ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
 
-    input_ids = input_ids.repeat(1, 2, 1)
-    attention_mask = attention_mask.repeat(1, 2, 1)
-    token_type_ids = token_type_ids.repeat(1, 2, 1)
-
     batch_size = input_ids.size(0)
-
     num_sent = input_ids.size(1)
 
     # Flatten input for encoding
@@ -122,19 +117,13 @@ def cl_forward(
     if cls.pooler_type == Pooler.TYPE_CLS:
         pooler_output = cls.mlp(pooler_output)
 
-    # Separate representation
+    # Calculate loss
     z1, z2 = pooler_output[:, 0], pooler_output[:, 1]
-
-    # Hard negative
-    if num_sent == 3:
-        z3 = pooler_output[:, 2]
-
     cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))
-
-    # Hard negative
-    if num_sent == 3:
-        z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
-        cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
+    for i in range(2, pooler_output.shape[1]):
+        zi = pooler_output[:, i]
+        z1_zi_cos = cls.sim(z1.unsqueeze(1), zi.unsqueeze(0))
+        cos_sim = torch.cat([cos_sim, z1_zi_cos], 1)
 
     labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
     loss_fct = nn.CrossEntropyLoss()
@@ -206,12 +195,13 @@ def cl_init(cls, config):
 class BertForCL(BertPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r'position_ids']
 
-    def __init__(self, config, temperature=None, pooler_type=None, mlp_only_train=None):
+    def __init__(self, config, temperature=None, pooler_type=None, mlp_only_train=None, num_augmentation=None):
         super().__init__(config)
 
         self.temperature = temperature
         self.pooler_type = pooler_type
         self.mlp_only_train = mlp_only_train
+        self.num_augmentation = num_augmentation
 
         self.bert = BertModel(config, add_pooling_layer=False)
 
@@ -266,12 +256,13 @@ class BertForCL(BertPreTrainedModel):
 class RobertaForCL(RobertaPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r'position_ids']
 
-    def __init__(self, config, temperature=None, pooler_type=None, mlp_only_train=None):
+    def __init__(self, config, temperature=None, pooler_type=None, mlp_only_train=None, num_augmentation=None):
         super().__init__(config)
 
         self.temperature = temperature
         self.pooler_type = pooler_type
         self.mlp_only_train = mlp_only_train
+        self.num_augmentation = num_augmentation
 
         self.roberta = RobertaModel(config, add_pooling_layer=False)
 

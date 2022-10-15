@@ -6,7 +6,8 @@ Used `SimCSE` as base project.
 
 ### Note
 
-Can only use CUDA_VISIBLE_DEVICES=0 GPU.
+Do not ever ever ever train with multi-gpu.
+Do not set gpus_per_trial more than 1.
 
 ### Env setup
 

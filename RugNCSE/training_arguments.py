@@ -50,7 +50,7 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     tune_choice_seed: List[int] = field(
         default_factory=lambda: [
-            42, 43, 44, 45, 46,
+            42, 43, 44,
         ]
     )
 

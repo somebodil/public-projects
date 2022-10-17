@@ -86,7 +86,7 @@ def main():
                 li = []
                 for j in range(training_args.num_augmentation):
                     li_item = tokenized[key][i + j * total]
-                    if j > 1:  # Anchor: j=0, Positive example: j=1
+                    if j > 1:  # Because Anchor: j=0, Positive example: j=1
                         li_item = tokenized[key][i + j * total][1:-1]
                         random.shuffle(li_item)
                         li_item.insert(0, tokenized[key][i + j * total][0])

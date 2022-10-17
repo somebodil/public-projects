@@ -35,27 +35,30 @@ class TrainingArguments(transformers.TrainingArguments):
 
     # Ray Tune Arguments --
     use_ray: bool = field(default=True)
-    num_samples: int = field(default=1)
+    local_dir: str = field(default='./ray_results/')
+    num_samples: int = field(default=1)  # Will be ignored because "tune.grid_search" is used
     metric_direction: str = field(default='maximize')  # Should be 'maximize' or 'minimize'
     max_concurrent_trials: int = field(default=0)
     cpus_per_trial: int = field(default=1)
-    gpus_per_trial: int = field(default=1)
-    tune_choice_learning_rate: List[float] = field(
+    gpus_per_trial: int = field(default=0.5)
+    tune_list_learning_rate: List[float] = field(
         default_factory=lambda: [
-            1e-3, 3e-3, 5e-3, 7e-3, 9e-3,
-            1e-4, 3e-4, 5e-4, 7e-4, 9e-4,
             1e-5, 3e-5, 5e-5, 7e-5, 9e-5,
-            1e-6, 3e-6, 5e-6, 7e-6, 9e-6,
         ]
     )
-    tune_choice_seed: List[int] = field(
+    tune_list_seed: List[int] = field(
         default_factory=lambda: [
-            42, 43, 44,
+            42
+        ]
+    )
+    tune_list_alpha: List[float] = field(
+        default_factory=lambda: [
+            0.1, 0.2, 0.3, 0.4
         ]
     )
 
     # Task Arguments --
-    num_proc: int = field(default=2)
+    num_proc: int = field(default=8)
 
     model_name_or_path: str = field(default='bert-base-uncased')
     max_seq_length: int = field(default=32)
@@ -66,4 +69,6 @@ class TrainingArguments(transformers.TrainingArguments):
 
     temperature: float = field(default=0.05)
 
-    num_augmentation: int = field(default=2)  # Should set more than 2
+    num_augmentation: int = field(default=3)  # Should set more than 2
+
+    alpha: float = field(default=0.5)  # Should be set between [0, 1]

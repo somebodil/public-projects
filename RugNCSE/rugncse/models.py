@@ -123,6 +123,7 @@ def cl_forward(
     for i in range(2, pooler_output.shape[1]):
         zi = pooler_output[:, i]
         z1_zi_cos = cls.sim(z1.unsqueeze(1), zi.unsqueeze(0))
+        z1_zi_cos *= cls.alpha
         cos_sim = torch.cat([cos_sim, z1_zi_cos], 1)
 
     labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
@@ -195,13 +196,14 @@ def cl_init(cls, config):
 class BertForCL(BertPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r'position_ids']
 
-    def __init__(self, config, temperature=None, pooler_type=None, mlp_only_train=None, num_augmentation=None):
+    def __init__(self, config, training_args=None):
         super().__init__(config)
 
-        self.temperature = temperature
-        self.pooler_type = pooler_type
-        self.mlp_only_train = mlp_only_train
-        self.num_augmentation = num_augmentation
+        self.alpha = training_args.alpha
+        self.temperature = training_args.temperature
+        self.pooler_type = training_args.pooler_type
+        self.mlp_only_train = training_args.mlp_only_train
+        self.num_augmentation = training_args.num_augmentation
 
         self.bert = BertModel(config, add_pooling_layer=False)
 
@@ -256,13 +258,14 @@ class BertForCL(BertPreTrainedModel):
 class RobertaForCL(RobertaPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r'position_ids']
 
-    def __init__(self, config, temperature=None, pooler_type=None, mlp_only_train=None, num_augmentation=None):
+    def __init__(self, config, training_args=None):
         super().__init__(config)
 
-        self.temperature = temperature
-        self.pooler_type = pooler_type
-        self.mlp_only_train = mlp_only_train
-        self.num_augmentation = num_augmentation
+        self.alpha = training_args.alpha
+        self.temperature = training_args.temperature
+        self.pooler_type = training_args.pooler_type
+        self.mlp_only_train = training_args.mlp_only_train
+        self.num_augmentation = training_args.num_augmentation
 
         self.roberta = RobertaModel(config, add_pooling_layer=False)
 

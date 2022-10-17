@@ -100,7 +100,8 @@ def main():
         preprocess_function,
         batched=True,
         remove_columns=column_names,
-        num_proc=training_args.num_proc
+        num_proc=training_args.num_proc,
+        load_from_cache_file=False,
     )
 
     config = BertConfig.from_pretrained(training_args.model_name_or_path)
@@ -113,19 +114,13 @@ def main():
             return RobertaForCL.from_pretrained(
                 model_name_or_path,
                 config=config,
-                temperature=training_args.temperature,
-                pooler_type=training_args.pooler_type,
-                mlp_only_train=training_args.mlp_only_train,
-                num_augmentation=training_args.num_augmentation,
+                training_args=training_args
             )
         elif 'bert' in training_args.model_name_or_path:
             return BertForCL.from_pretrained(
                 model_name_or_path,
                 config=config,
-                temperature=training_args.temperature,
-                pooler_type=training_args.pooler_type,
-                mlp_only_train=training_args.mlp_only_train,
-                num_augmentation=training_args.num_augmentation,
+                training_args=training_args
             )
         else:
             raise NotImplementedError
@@ -189,16 +184,11 @@ def main():
 
     else:
         # Init
-        ray.init()
+        ray.init(log_to_driver=False)
 
         # Callback code, to let ray-tune run trainer evaluate for test-set at the end of the trial
         class EndOfTrialCallback(Callback):
             def on_trial_complete(self, iteration: int, trials: List["Trial"], trial: "Trial", **info):
-                # Overwrite last_result as best_result for Reporter
-                trial.last_result['objective'] = trial.metric_analysis["objective"][training_args.metric_direction[:3]]
-                trial.last_result['eval_accuracy'] = trial.metric_analysis["objective"][
-                    training_args.metric_direction[:3]]
-
                 # Save best model val-dataset accuracy
                 with open(trial.logdir + os.sep + "trial_best_model_val_result.txt", "w") as fp:
                     # HF Trainer provided metric from "compute_objective" is saved always as "objective"
@@ -241,20 +231,23 @@ def main():
         best_run = trainer.hyperparameter_search(
             backend="ray",
             hp_space=lambda _: {
-                "seed": tune.choice(training_args.tune_choice_seed),
-                "learning_rate": tune.choice(training_args.tune_choice_learning_rate),
+                "seed": tune.grid_search(training_args.tune_list_seed),
+                "learning_rate": tune.grid_search(training_args.tune_list_learning_rate),
+                "alpha": tune.grid_search(training_args.tune_list_alpha)
             },
             compute_objective=lambda metrics: metrics[training_args.metric_for_best_model],
             n_trials=training_args.num_samples,
             direction=training_args.metric_direction,
             resources_per_trial={"cpu": training_args.cpus_per_trial, "gpu": training_args.gpus_per_trial},
-            local_dir="./ray_results/",
+            local_dir=training_args.local_dir,
             search_alg=BasicVariantGenerator(
                 max_concurrent=training_args.max_concurrent_trials,
                 constant_grid_search=True
             ),
             scheduler=FIFOScheduler(),
-            progress_reporter=CLIReporter(metric_columns=["eval_loss", training_args.metric_for_best_model]),
+            progress_reporter=CLIReporter(  # Does not show best result
+                metric_columns=[training_args.metric_for_best_model]
+            ),
             log_to_file=True,
             callbacks=[EndOfTrialCallback()]
         )

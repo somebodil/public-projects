@@ -43,7 +43,7 @@ class TrainingArguments(transformers.TrainingArguments):
     gpus_per_trial: int = field(default=0.5)
     tune_list_learning_rate: List[float] = field(
         default_factory=lambda: [
-            1e-5, 3e-5, 5e-5, 7e-5, 9e-5,
+            1e-5, 3e-5, 5e-5, 7e-5
         ]
     )
     tune_list_seed: List[int] = field(
@@ -53,7 +53,7 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     tune_list_alpha: List[float] = field(
         default_factory=lambda: [
-            0.1, 0.2, 0.3, 0.4
+            0.1, 0.2, 0.3
         ]
     )
 

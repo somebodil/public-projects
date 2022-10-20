@@ -90,21 +90,22 @@ def cl_init(cls, config):
     cls.init_weights()
 
 
-def cl_forward(cls,
-               encoder,
-               input_ids=None,
-               attention_mask=None,
-               token_type_ids=None,
-               position_ids=None,
-               head_mask=None,
-               inputs_embeds=None,
-               labels=None,
-               output_attentions=None,
-               output_hidden_states=None,
-               return_dict=None,
-               mlm_input_ids=None,
-               mlm_labels=None,
-               ):
+def cl_forward(
+        cls,
+        encoder,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        mlm_input_ids=None,
+        mlm_labels=None,
+):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
     ori_input_ids = input_ids
     batch_size = input_ids.size(0)
@@ -202,7 +203,7 @@ def cl_forward(cls,
         z3_weight = cls.model_args.hard_negative_weight
         weights = torch.tensor(
             [[0.0] * (cos_sim.size(-1) - z1_z3_cos.size(-1)) + [0.0] * i + [z3_weight] + [0.0] * (
-                        z1_z3_cos.size(-1) - i - 1) for i in range(z1_z3_cos.size(-1))]
+                    z1_z3_cos.size(-1) - i - 1) for i in range(z1_z3_cos.size(-1))]
         ).to(cls.device)
         cos_sim = cos_sim + weights
 
@@ -281,49 +282,54 @@ class BertForCL(BertPreTrainedModel):
 
         cl_init(self, config)
 
-    def forward(self,
-                input_ids=None,
-                attention_mask=None,
-                token_type_ids=None,
-                position_ids=None,
-                head_mask=None,
-                inputs_embeds=None,
-                labels=None,
-                output_attentions=None,
-                output_hidden_states=None,
-                return_dict=None,
-                sent_emb=False,
-                mlm_input_ids=None,
-                mlm_labels=None,
-                ):
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
+            sent_emb=False,
+            mlm_input_ids=None,
+            mlm_labels=None,
+    ):
         if sent_emb:
-            return sentemb_forward(self, self.bert,
-                                   input_ids=input_ids,
-                                   attention_mask=attention_mask,
-                                   token_type_ids=token_type_ids,
-                                   position_ids=position_ids,
-                                   head_mask=head_mask,
-                                   inputs_embeds=inputs_embeds,
-                                   labels=labels,
-                                   output_attentions=output_attentions,
-                                   output_hidden_states=output_hidden_states,
-                                   return_dict=return_dict,
-                                   )
+            return sentemb_forward(
+                self,
+                self.bert,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+                head_mask=head_mask,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
         else:
-            return cl_forward(self, self.bert,
-                              input_ids=input_ids,
-                              attention_mask=attention_mask,
-                              token_type_ids=token_type_ids,
-                              position_ids=position_ids,
-                              head_mask=head_mask,
-                              inputs_embeds=inputs_embeds,
-                              labels=labels,
-                              output_attentions=output_attentions,
-                              output_hidden_states=output_hidden_states,
-                              return_dict=return_dict,
-                              mlm_input_ids=mlm_input_ids,
-                              mlm_labels=mlm_labels,
-                              )
+            return cl_forward(
+                self,
+                self.bert,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+                head_mask=head_mask,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                mlm_input_ids=mlm_input_ids,
+                mlm_labels=mlm_labels,
+            )
 
 
 class RobertaForCL(RobertaPreTrainedModel):
@@ -355,30 +361,34 @@ class RobertaForCL(RobertaPreTrainedModel):
                 mlm_labels=None,
                 ):
         if sent_emb:
-            return sentemb_forward(self, self.roberta,
-                                   input_ids=input_ids,
-                                   attention_mask=attention_mask,
-                                   token_type_ids=token_type_ids,
-                                   position_ids=position_ids,
-                                   head_mask=head_mask,
-                                   inputs_embeds=inputs_embeds,
-                                   labels=labels,
-                                   output_attentions=output_attentions,
-                                   output_hidden_states=output_hidden_states,
-                                   return_dict=return_dict,
-                                   )
+            return sentemb_forward(
+                self,
+                self.roberta,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+                head_mask=head_mask,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
         else:
-            return cl_forward(self, self.roberta,
-                              input_ids=input_ids,
-                              attention_mask=attention_mask,
-                              token_type_ids=token_type_ids,
-                              position_ids=position_ids,
-                              head_mask=head_mask,
-                              inputs_embeds=inputs_embeds,
-                              labels=labels,
-                              output_attentions=output_attentions,
-                              output_hidden_states=output_hidden_states,
-                              return_dict=return_dict,
-                              mlm_input_ids=mlm_input_ids,
-                              mlm_labels=mlm_labels,
-                              )
+            return cl_forward(
+                self,
+                self.roberta,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                position_ids=position_ids,
+                head_mask=head_mask,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                mlm_input_ids=mlm_input_ids,
+                mlm_labels=mlm_labels,
+            )

@@ -3,6 +3,7 @@
 
 # Exp results
 exp_*
+*.out
 
 # Bakups
 /bak

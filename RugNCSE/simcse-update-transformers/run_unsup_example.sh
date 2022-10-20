@@ -20,7 +20,7 @@ python train.py \
     --temp 0.05 \
     --do_train \
     --do_eval \
-    --output_dir result/my-unsup-simcse-bert-base-uncased \
+    --output_dir exp_result/my-unsup-simcse-bert-base-uncased \
     --learning_rate 4e-5 \
     --fp16 \
     "$@"

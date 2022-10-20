@@ -1,1 +1,8 @@
+# IDE
+.idea
+
+# Exp results
 exp_*
+
+# Bakups
+/bak

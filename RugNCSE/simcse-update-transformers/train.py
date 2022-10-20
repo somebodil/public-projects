@@ -297,8 +297,10 @@ def main():
     if extension == "txt":
         extension = "text"
     if extension == "csv":
-        datasets = load_dataset(extension, data_files=data_files,
-                                delimiter="\t" if "tsv" in data_args.train_file else ",")  # YYH; removed cache_dir="./data/" because of hang
+        # YYH; removed cache_dir="./data/" because of hang
+        datasets = load_dataset(
+            extension, data_files=data_files, delimiter="\t" if "tsv" in data_args.train_file else ","
+        )
     else:
         datasets = load_dataset(extension, data_files=data_files)  # YYH; removed cache_dir="./data/" because of hang
 

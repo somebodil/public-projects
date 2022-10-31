@@ -4,7 +4,7 @@
 # If you want to train it with multiple GPU cards, see "run_sup_example.sh"
 # about how to use PyTorch's distributed data parallel.
 
-python train.py \
+python -u train.py \
     --model_name_or_path bert-base-uncased \
     --train_file data/wiki1m_for_simcse.txt \
     --num_train_epochs 1 \
@@ -14,13 +14,16 @@ python train.py \
     --metric_for_best_model stsb_spearman \
     --load_best_model_at_end \
     --eval_steps 125 \
+    --save_steps 125 \
     --pooler_type cls \
     --mlp_only_train \
     --overwrite_output_dir \
     --temp 0.05 \
     --do_train \
     --do_eval \
-    --output_dir exp_result/my-unsup-simcse-bert-base-uncased \
-    --learning_rate 4e-5 \
     --fp16 \
+    --num_hard_neg_aug 0 \
+    --alpha 1 \
+    --learning_rate 1e-5 \
     "$@"
+#    --output_dir exp_result/my-unsup-bert-base-uncased \

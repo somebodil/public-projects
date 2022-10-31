@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import sys
 from dataclasses import dataclass, field
 from typing import Optional, Union, List, Dict, Tuple
@@ -19,12 +20,11 @@ from transformers import (
     set_seed,
     BertForPreTraining
 )
-from transformers.file_utils import cached_property, torch_required, is_torch_tpu_available
 from transformers.tokenization_utils_base import PaddingStrategy, PreTrainedTokenizerBase
 from transformers.trainer_utils import is_main_process
 
-from simcse.models import RobertaForCL, BertForCL
-from simcse.trainers import CLTrainer
+from core.models import RobertaForCL, BertForCL
+from core.trainers import CLTrainer
 
 logger = logging.getLogger(__name__)
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_LM_MAPPING.keys())
@@ -113,6 +113,9 @@ class ModelArguments:
         }
     )
 
+    # rugncse algs
+    alpha: float = field(default=1)
+
 
 @dataclass
 class DataTrainingArguments:
@@ -176,10 +179,6 @@ class DataTrainingArguments:
 
 @dataclass
 class OurTrainingArguments(TrainingArguments):
-    # Evaluation
-    ## By default, we evaluate STS (dev) during training (for selecting best checkpoints) and evaluate 
-    ## both STS and transfer tasks (dev) at the end of training. Using --eval_transfer will allow evaluating
-    ## both STS and transfer tasks (dev) during training.
     eval_transfer: bool = field(
         default=False,
         metadata={"help": "Evaluate transfer task dev sets (in validation)."}
@@ -187,52 +186,7 @@ class OurTrainingArguments(TrainingArguments):
 
     save_total_limit: int = field(default=2)
 
-    @cached_property
-    @torch_required
-    def _setup_devices(self) -> "torch.device":
-        logger.info("PyTorch: setting up devices")
-        if self.no_cuda:
-            device = torch.device("cpu")
-            self._n_gpu = 0
-        elif is_torch_tpu_available():
-            device = xm.xla_device()
-            self._n_gpu = 0
-        elif self.local_rank == -1:
-            # if n_gpu is > 1 we'll use nn.DataParallel.
-            # If you only want to use a specific subset of GPUs use `CUDA_VISIBLE_DEVICES=0`
-            # Explicitly set CUDA to the first (index 0) CUDA device, otherwise `set_device` will
-            # trigger an error that a device index is missing. Index 0 takes into account the
-            # GPUs available in the environment, so `CUDA_VISIBLE_DEVICES=1,2` with `cuda:0`
-            # will use the first GPU in that env, i.e. GPU#1
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            # Sometimes the line in the postinit has not been run before we end up here, so just checking we're not at
-            # the default value.
-            self._n_gpu = torch.cuda.device_count()
-        else:
-            # Here, we'll use torch.distributed.
-            # Initializes the distributed backend which will take care of synchronizing nodes/GPUs
-            #
-            # deepspeed performs its own DDP internally, and requires the program to be started with:
-            # deepspeed  ./program.py
-            # rather than:
-            # python -m torch.distributed.launch --nproc_per_node=2 ./program.py
-            if self.deepspeed:
-                from .integrations import is_deepspeed_available
-
-                if not is_deepspeed_available():
-                    raise ImportError("--deepspeed requires deepspeed: `pip install deepspeed`.")
-                import deepspeed
-
-                deepspeed.init_distributed()
-            else:
-                torch.distributed.init_process_group(backend="nccl")
-            device = torch.device("cuda", self.local_rank)
-            self._n_gpu = 1
-
-        if device.type == "cuda":
-            torch.cuda.set_device(device)
-
-        return device
+    num_hard_neg_aug: int = field(default=1)
 
 
 def main():
@@ -377,23 +331,16 @@ def main():
     # Prepare features
     column_names = datasets["train"].column_names
     sent2_cname = None
-    if len(column_names) == 2:
-        # Pair datasets
-        sent0_cname = column_names[0]
-        sent1_cname = column_names[1]
-    elif len(column_names) == 3:
-        # Pair datasets with hard negatives
-        sent0_cname = column_names[0]
-        sent1_cname = column_names[1]
-        sent2_cname = column_names[2]
-    elif len(column_names) == 1:
+    if len(column_names) == 1:
         # Unsupervised datasets
-        sent0_cname = column_names[0]
-        sent1_cname = column_names[0]
+        column_name = column_names[0]
     else:
         raise NotImplementedError
 
     def prepare_features(examples):
+        # Because of num_proc
+        set_seed(training_args.seed)
+
         # padding = longest (default)
         #   If no sentence in the batch exceed the max length, then use
         #   the max sentence length in the batch, otherwise use the 
@@ -401,42 +348,35 @@ def main():
         #   exceed the max length.
         # padding = max_length (when pad_to_max_length, for pressure test)
         #   All sentences are padded/truncated to data_args.max_seq_length.
-        total = len(examples[sent0_cname])
+        total = len(examples[column_name])
 
-        # Avoid "None" fields 
-        for idx in range(total):
-            if examples[sent0_cname][idx] is None:
-                examples[sent0_cname][idx] = " "
-            if examples[sent1_cname][idx] is None:
-                examples[sent1_cname][idx] = " "
+        sentences = examples[column_name] + examples[column_name]
 
-        sentences = examples[sent0_cname] + examples[sent1_cname]
+        for i in range(training_args.num_hard_neg_aug):
+            for j in range(total):
+                li = examples[column_name][j].split()
+                random.shuffle(li)
+                examples[column_name][j] = li.__str__()
 
-        # If hard negative exists
-        if sent2_cname is not None:
-            for idx in range(total):
-                if examples[sent2_cname][idx] is None:
-                    examples[sent2_cname][idx] = " "
-            sentences += examples[sent2_cname]
+            sentences += examples[column_name]
 
-        sent_features = tokenizer(
+        tokenized = tokenizer(
             sentences,
             max_length=data_args.max_seq_length,
             truncation=True,
             padding="max_length" if data_args.pad_to_max_length else False,
         )
 
-        features = {}
-        if sent2_cname is not None:
-            for key in sent_features:
-                features[key] = [
-                    [sent_features[key][i], sent_features[key][i + total], sent_features[key][i + total * 2]] for i in
-                    range(total)]
-        else:
-            for key in sent_features:
-                features[key] = [[sent_features[key][i], sent_features[key][i + total]] for i in range(total)]
-
-        return features
+        result = {}
+        for key in tokenized:  # Wrap
+            result[key] = []
+            for i in range(total):
+                li = []
+                for j in range(2 + training_args.num_hard_neg_aug):  # 0: anchor, 1: dropout augmented positive example
+                    li_item = tokenized[key][i + j * total]
+                    li.append(li_item)
+                result[key].append(li)
+        return result
 
     if training_args.do_train:
         train_dataset = datasets["train"].map(
@@ -466,6 +406,7 @@ def main():
                 num_sent = len(features[0]['input_ids'])
             else:
                 return
+
             flat_features = []
             for feature in features:
                 for i in range(num_sent):
@@ -575,11 +516,6 @@ def main():
                     writer.write(f"{key} = {value}\n")
 
     return results
-
-
-def _mp_fn(index):
-    # For xla_spawn (TPUs)
-    main()
 
 
 if __name__ == "__main__":

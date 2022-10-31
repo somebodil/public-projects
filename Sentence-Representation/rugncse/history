@@ -1,0 +1,94 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Same as "simcse-update-transformers", proving that modification did not affect simcse original code
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Common param:
+ --learning_rate 1e-5
+ --per_device_train_batch_size 64
+ --fp16
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --num_hard_neg_aug 0 --output_dir exp_result/my-unsup-bert-base-uncased0 &> exp_unsup0.out &
+
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+        | STS12 | STS13 | STS14 | STS15 | STS16 | STSBenchmark | SICKRelatedness |  Avg. |
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+        | 68.02 | 80.71 | 74.00 | 81.27 | 79.80 |    78.21     |      71.98      | 76.28 |
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --output_dir exp_result/my-unsup-bert-base-uncased1 &> exp_unsup1.out &
+
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+        | STS12 | STS13 | STS14 | STS15 | STS16 | STSBenchmark | SICKRelatedness |  Avg. |
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+        | 65.82 | 81.42 | 73.28 | 80.73 | 79.70 |    76.28     |      70.76      | 75.43 |
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Do random permutation as hard_neg_aug, adding 'n' hard neg aug results multiplying (1 + 'n') batch size
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Common param:
+ --per_device_train_batch_size 64
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.1 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased00 &> exp_unsup00.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.1 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased01 &> exp_unsup01.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.1 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased02 &> exp_unsup02.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.1 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased03 &> exp_unsup03.out &
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.2 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased04 &> exp_unsup04.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.2 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased05 &> exp_unsup05.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.2 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased06 &> exp_unsup06.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.2 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased07 &> exp_unsup07.out &
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.3 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased08 &> exp_unsup08.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.3 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased09 &> exp_unsup09.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.3 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased10 &> exp_unsup10.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.3 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased11 &> exp_unsup11.out &
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.4 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased12 &> exp_unsup12.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.4 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased13 &> exp_unsup13.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.4 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased14 &> exp_unsup14.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --alpha 0.4 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased15 &> exp_unsup15.out &
+
+        # Best result, from my-unsup-bert-base-uncased06
+
+            "best_metric": 0.8219179312524264
+
+            +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+            | STS12 | STS13 | STS14 | STS15 | STS16 | STSBenchmark | SICKRelatedness |  Avg. |
+            +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+            | 66.92 | 82.29 | 73.74 | 81.39 | 79.00 |    77.62     |      71.71      | 76.10 |
+            +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Do random permutation as hard_neg_aug, adding 'n' hard neg aug results adding (1) batch size
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Common param:
+ --per_device_train_batch_size 64
+ --alpha 1
+ --fp16
+ --num_hard_neg_aug 1
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --learning_rate 1e-5 --output_dir exp_result/my-unsup00 &> my-unsup00.out &
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --learning_rate 2e-5 --output_dir exp_result/my-unsup01 &> my-unsup01.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --learning_rate 3e-5 --output_dir exp_result/my-unsup02 &> my-unsup02.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --learning_rate 4e-5 --output_dir exp_result/my-unsup03 &> my-unsup03.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --learning_rate 5e-5 --output_dir exp_result/my-unsup04 &> my-unsup04.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --learning_rate 6e-5 --output_dir exp_result/my-unsup05 &> my-unsup05.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --learning_rate 7e-5 --output_dir exp_result/my-unsup06 &> my-unsup06.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --learning_rate 8e-5 --output_dir exp_result/my-unsup07 &> my-unsup07.out &
+
+        // Not good
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Do random permutation as hard_neg_aug, adding 'n' hard neg aug results adding (1) batch size, without & with ***TEMPERATURE SCALING LINEAR GROWTH***
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Common param:
+ --per_device_train_batch_size 64
+ --num_hard_neg_aug 0
+ --fp16
+ --learning_rate 1e-5
+
+CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --output_dir exp_result/my-unsup00 &> my-unsup00.out &  # /wo temp lin-growth
+CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --output_dir exp_result/my-unsup01 &> my-unsup01.out &  # /w  temp lin-growth +0.0005 per 100step
+CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --output_dir exp_result/my-unsup02 &> my-unsup02.out &  # /w  temp lin-growth +0.0003 per 100step
+CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --output_dir exp_result/my-unsup03 &> my-unsup03.out &  # /w  temp lin-growth +0.0001 per 100step

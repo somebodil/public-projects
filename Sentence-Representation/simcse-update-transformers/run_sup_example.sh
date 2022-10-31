@@ -14,8 +14,8 @@ export OMP_NUM_THREADS=8
 
 # Use distributed data parallel
 # If you only want to use one card, uncomment the following line and comment the line with "torch.distributed.launch"
- python train.py \
 #python -m torch.distributed.launch --nproc_per_node $NUM_GPU --master_port $PORT_ID train.py \
+ python -u train.py \
     --model_name_or_path bert-base-uncased \
     --train_file data/nli_for_simcse.csv \
     --output_dir result/my-sup-simcse-bert-base-uncased \
@@ -27,6 +27,7 @@ export OMP_NUM_THREADS=8
     --metric_for_best_model stsb_spearman \
     --load_best_model_at_end \
     --eval_steps 125 \
+    --save_steps 125 \
     --pooler_type cls \
     --overwrite_output_dir \
     --temp 0.05 \

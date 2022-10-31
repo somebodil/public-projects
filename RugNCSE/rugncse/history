@@ -1,2 +1,0 @@
-CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --num_hard_neg_aug 0 --output_dir exp_result/my-unsup-bert-base-uncased0 &> exp_unsup0.out &
-CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --num_hard_neg_aug 1 --output_dir exp_result/my-unsup-bert-base-uncased1 &> exp_unsup1.out &

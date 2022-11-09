@@ -109,7 +109,6 @@ def cl_forward(
         mlm_labels=None,
 ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
-    ori_input_ids = input_ids
     batch_size = input_ids.size(0)
     # Number of sentences in one instance
     # 2: pair instance; 3: pair instance with a hard negative
@@ -205,16 +204,6 @@ def cl_forward(
 
     labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
     loss_fct = nn.CrossEntropyLoss()
-
-    # Calculate loss with hard negatives
-    if num_sent == 3:
-        # Note that weights are actually logits of weights
-        z3_weight = cls.model_args.hard_negative_weight
-        weights = torch.tensor(
-            [[0.0] * (cos_sim.size(-1) - z1_z3_cos.size(-1)) + [0.0] * i + [z3_weight] + [0.0] * (
-                    z1_z3_cos.size(-1) - i - 1) for i in range(z1_z3_cos.size(-1))]
-        ).to(cls.device)
-        cos_sim = cos_sim + weights
 
     loss = loss_fct(cos_sim, labels)
 

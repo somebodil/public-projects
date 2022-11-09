@@ -11,7 +11,6 @@ from transformers import (
     CONFIG_MAPPING,
     MODEL_FOR_MASKED_LM_MAPPING,
     AutoConfig,
-    AutoModelForMaskedLM,
     AutoTokenizer,
     HfArgumentParser,
     TrainingArguments,
@@ -23,7 +22,7 @@ from transformers.file_utils import cached_property, torch_required, is_torch_tp
 from transformers.tokenization_utils_base import PaddingStrategy, PreTrainedTokenizerBase
 from transformers.trainer_utils import is_main_process
 
-from core.models import RobertaForCL, BertForCL
+from core.models import BertForCL
 from core.trainers import CLTrainer
 
 logger = logging.getLogger(__name__)
@@ -112,6 +111,10 @@ class ModelArguments:
             "help": "Use MLP only during training"
         }
     )
+
+    # strong-dropout-to-pos-as-hard-neg arg
+    pos_dropout_rate: float = field(default=0.1)
+    hard_neg_dropout_rate: float = field(default=0.4)
 
 
 @dataclass
@@ -343,16 +346,11 @@ def main():
 
     if model_args.model_name_or_path:
         if 'roberta' in model_args.model_name_or_path:
-            model = RobertaForCL.from_pretrained(
-                model_args.model_name_or_path,
-                from_tf=bool(".ckpt" in model_args.model_name_or_path),
-                config=config,
-                cache_dir=model_args.cache_dir,
-                revision=model_args.model_revision,
-                use_auth_token=True if model_args.use_auth_token else None,
-                model_args=model_args
-            )
+            raise NotImplementedError
         elif 'bert' in model_args.model_name_or_path:
+            config.hidden_dropout_prob = model_args.pos_dropout_rate
+            config.attention_probs_dropout_prob = model_args.pos_dropout_rate
+
             model = BertForCL.from_pretrained(
                 model_args.model_name_or_path,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
@@ -442,7 +440,7 @@ def main():
             batched=True,
             num_proc=data_args.preprocessing_num_workers,
             remove_columns=column_names,
-            load_from_cache_file=False,  # YYH; load_from_cache_file=not data_args.overwrite_cache,
+            load_from_cache_file=not data_args.overwrite_cache,
         )
 
     # Data collator

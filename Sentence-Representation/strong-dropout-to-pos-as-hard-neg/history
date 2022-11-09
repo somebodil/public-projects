@@ -1,0 +1,105 @@
+Experiment with below common param, use 'no_grad' when creating hard_neg example
+
+    python train.py \
+        --model_name_or_path bert-base-uncased \
+        --train_file data/wiki1m_for_simcse.txt \
+        --num_train_epochs 1 \
+        --per_device_train_batch_size 64 \
+        --max_seq_length 32 \
+        --evaluation_strategy steps \
+        --metric_for_best_model stsb_spearman \
+        --load_best_model_at_end \
+        --eval_steps 125 \
+        --save_steps 125 \
+        --pooler_type cls \
+        --mlp_only_train \
+        --overwrite_output_dir \
+        --temp 0.05 \
+        --do_train \
+        --do_eval \
+        --output_dir exp_result/my-unsup-simcse-bert-base-uncased \
+        --learning_rate 3e-5 \
+        --fp16 \
+        "$@"
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased00 &> exp_unsup00.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased01 &> exp_unsup01.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased02 &> exp_unsup02.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased03 &> exp_unsup03.out &
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased04 &> exp_unsup04.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased05 &> exp_unsup05.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased06 &> exp_unsup06.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased07 &> exp_unsup07.out &
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased08 &> exp_unsup08.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased09 &> exp_unsup09.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased10 &> exp_unsup10.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased11 &> exp_unsup11.out &
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased12 &> exp_unsup12.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased13 &> exp_unsup13.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased14 &> exp_unsup14.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased15 &> exp_unsup15.out &
+
+        // result not good, best dev result was
+
+        "best_metric": 0.8249276226721398,
+        "best_model_checkpoint": "exp_result/my-unsup-bert-base-uncased09/checkpoint-4125",
+
+
+Experiment with below common param, no 'no_grad' when creating hard_neg example
+
+    python train.py \
+        --model_name_or_path bert-base-uncased \
+        --train_file data/wiki1m_for_simcse.txt \
+        --num_train_epochs 1 \
+        --per_device_train_batch_size 64 \
+        --max_seq_length 32 \
+        --evaluation_strategy steps \
+        --metric_for_best_model stsb_spearman \
+        --load_best_model_at_end \
+        --eval_steps 125 \
+        --save_steps 125 \
+        --pooler_type cls \
+        --mlp_only_train \
+        --overwrite_output_dir \
+        --temp 0.05 \
+        --do_train \
+        --do_eval \
+        --output_dir exp_result/my-unsup-simcse-bert-base-uncased \
+        --learning_rate 3e-5 \
+        --fp16 \
+        "$@"
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased00 &> exp_unsup00.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased01 &> exp_unsup01.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased02 &> exp_unsup02.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.4 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased03 &> exp_unsup03.out &
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased04 &> exp_unsup04.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased05 &> exp_unsup05.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased06 &> exp_unsup06.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.5 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased07 &> exp_unsup07.out &
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased08 &> exp_unsup08.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased09 &> exp_unsup09.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased10 &> exp_unsup10.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.6 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased11 &> exp_unsup11.out &
+
+    CUDA_VISIBLE_DEVICES=0 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 1e-5 --output_dir exp_result/my-unsup-bert-base-uncased12 &> exp_unsup12.out &
+    CUDA_VISIBLE_DEVICES=1 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 2e-5 --output_dir exp_result/my-unsup-bert-base-uncased13 &> exp_unsup13.out &
+    CUDA_VISIBLE_DEVICES=2 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 3e-5 --output_dir exp_result/my-unsup-bert-base-uncased14 &> exp_unsup14.out &
+    CUDA_VISIBLE_DEVICES=3 nohup bash run_unsup_example.sh --hard_neg_dropout_rate 0.7 --learning_rate 4e-5 --output_dir exp_result/my-unsup-bert-base-uncased15 &> exp_unsup15.out &
+
+        // result not good, best test result was
+
+        my-unsup-bert-base-uncased05,
+        "best_metric": 0.8254415742503929,
+        "best_model_checkpoint": "exp_result/my-unsup-bert-base-uncased05/checkpoint-10500",
+
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+        | STS12 | STS13 | STS14 | STS15 | STS16 | STSBenchmark | SICKRelatedness |  Avg. |
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+
+        | 67.68 | 81.69 | 74.79 | 81.78 | 79.93 |    77.99     |      71.84      | 76.53 |
+        +-------+-------+-------+-------+-------+--------------+-----------------+-------+

@@ -1,11 +1,9 @@
-import sys
-import io, os
-import numpy as np
-import logging
 import argparse
-from prettytable import PrettyTable
+import logging
+import sys
+
 import torch
-import transformers
+from prettytable import PrettyTable
 from transformers import AutoModel, AutoTokenizer
 
 # Set up logger
@@ -19,42 +17,44 @@ PATH_TO_DATA = './SentEval/data'
 sys.path.insert(0, PATH_TO_SENTEVAL)
 import senteval
 
+
 def print_table(task_names, scores):
     tb = PrettyTable()
     tb.field_names = task_names
     tb.add_row(scores)
     print(tb)
 
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", type=str, 
-            help="Transformers' model name or path")
-    parser.add_argument("--pooler", type=str, 
-            choices=['cls', 'cls_before_pooler', 'avg', 'avg_top2', 'avg_first_last'], 
-            default='cls', 
-            help="Which pooler to use")
-    parser.add_argument("--mode", type=str, 
-            choices=['dev', 'test', 'fasttest'],
-            default='test', 
-            help="What evaluation mode to use (dev: fast mode, dev results; test: full mode, test results); fasttest: fast mode, test results")
-    parser.add_argument("--task_set", type=str, 
-            choices=['sts', 'transfer', 'full', 'na'],
-            default='sts',
-            help="What set of tasks to evaluate on. If not 'na', this will override '--tasks'")
-    parser.add_argument("--tasks", type=str, nargs='+', 
-            default=['STS12', 'STS13', 'STS14', 'STS15', 'STS16',
-                     'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'TREC', 'MRPC',
-                     'SICKRelatedness', 'STSBenchmark'], 
-            help="Tasks to evaluate on. If '--task_set' is specified, this will be overridden")
-    
+    parser.add_argument("--model_name_or_path", type=str,
+                        help="Transformers' model name or path")
+    parser.add_argument("--pooler", type=str,
+                        choices=['cls', 'cls_before_pooler', 'avg', 'avg_top2', 'avg_first_last'],
+                        default='cls',
+                        help="Which pooler to use")
+    parser.add_argument("--mode", type=str,
+                        choices=['dev', 'test', 'fasttest'],
+                        default='test',
+                        help="What evaluation mode to use (dev: fast mode, dev results; test: full mode, test results); fasttest: fast mode, test results")
+    parser.add_argument("--task_set", type=str,
+                        choices=['sts', 'transfer', 'full', 'na'],
+                        default='sts',
+                        help="What set of tasks to evaluate on. If not 'na', this will override '--tasks'")
+    parser.add_argument("--tasks", type=str, nargs='+',
+                        default=['STS12', 'STS13', 'STS14', 'STS15', 'STS16',
+                                 'MR', 'CR', 'MPQA', 'SUBJ', 'SST2', 'TREC', 'MRPC',
+                                 'SICKRelatedness', 'STSBenchmark'],
+                        help="Tasks to evaluate on. If '--task_set' is specified, this will be overridden")
+
     args = parser.parse_args()
-    
+
     # Load transformers' model checkpoint
     model = AutoModel.from_pretrained(args.model_name_or_path)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-    
+
     # Set up the tasks
     if args.task_set == 'sts':
         args.tasks = ['STS12', 'STS13', 'STS14', 'STS15', 'STS16', 'STSBenchmark', 'SICKRelatedness']
@@ -69,19 +69,19 @@ def main():
         # Fast mode
         params = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 5}
         params['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 128,
-                                         'tenacity': 3, 'epoch_size': 2}
+                                'tenacity': 3, 'epoch_size': 2}
     elif args.mode == 'test':
         # Full mode
         params = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 10}
         params['classifier'] = {'nhid': 0, 'optim': 'adam', 'batch_size': 64,
-                                         'tenacity': 5, 'epoch_size': 4}
+                                'tenacity': 5, 'epoch_size': 4}
     else:
         raise NotImplementedError
 
     # SentEval prepare and batcher
     def prepare(params, samples):
         return
-    
+
     def batcher(params, batch, max_length=None):
         # Handle rare token encoding issues in the dataset
         if len(batch) >= 1 and len(batch[0]) >= 1 and isinstance(batch[0][0], bytes):
@@ -108,7 +108,7 @@ def main():
         # Move to the correct device
         for k in batch:
             batch[k] = batch[k].to(device)
-        
+
         # Get raw embeddings
         with torch.no_grad():
             outputs = model(**batch, output_hidden_states=True, return_dict=True)
@@ -143,7 +143,7 @@ def main():
         se = senteval.engine.SE(params, batcher, prepare)
         result = se.eval(task)
         results[task] = result
-    
+
     # Print evaluation results
     if args.mode == 'dev':
         print("------ %s ------" % (args.mode))
@@ -163,7 +163,7 @@ def main():
         for task in ['MR', 'CR', 'SUBJ', 'MPQA', 'SST2', 'TREC', 'MRPC']:
             task_names.append(task)
             if task in results:
-                scores.append("%.2f" % (results[task]['devacc']))    
+                scores.append("%.2f" % (results[task]['devacc']))
             else:
                 scores.append("0.00")
         task_names.append("Avg.")
@@ -193,7 +193,7 @@ def main():
         for task in ['MR', 'CR', 'SUBJ', 'MPQA', 'SST2', 'TREC', 'MRPC']:
             task_names.append(task)
             if task in results:
-                scores.append("%.2f" % (results[task]['acc']))    
+                scores.append("%.2f" % (results[task]['acc']))
             else:
                 scores.append("0.00")
         task_names.append("Avg.")

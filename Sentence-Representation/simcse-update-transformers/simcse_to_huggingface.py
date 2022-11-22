@@ -3,9 +3,10 @@ Convert SimCSE's checkpoints to Huggingface style.
 """
 
 import argparse
-import torch
-import os
 import json
+import os
+
+import torch
 
 
 def main():

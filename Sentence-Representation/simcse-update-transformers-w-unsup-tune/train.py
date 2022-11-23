@@ -1,29 +1,34 @@
+import json
 import logging
 import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional, Union, List, Dict, Tuple
 
+import ray
 import torch
 import transformers
 from datasets import load_dataset
+from ray import tune
+from ray.tune import Callback
+from ray.tune.schedulers import FIFOScheduler
+from ray.tune.search import BasicVariantGenerator
 from transformers import (
     CONFIG_MAPPING,
     MODEL_FOR_MASKED_LM_MAPPING,
     AutoConfig,
     AutoTokenizer,
     HfArgumentParser,
-    TrainingArguments,
     default_data_collator,
     set_seed,
     BertForPreTraining
 )
-from transformers.file_utils import cached_property, torch_required, is_torch_tpu_available
 from transformers.tokenization_utils_base import PaddingStrategy, PreTrainedTokenizerBase
 from transformers.trainer_utils import is_main_process
 
 from core.models import RobertaForCL, BertForCL
 from core.trainers import CLTrainer
+from training_arguments import OurTrainingArguments
 
 logger = logging.getLogger(__name__)
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_LM_MAPPING.keys())
@@ -38,7 +43,7 @@ class ModelArguments:
 
     # Huggingface's original arguments
     model_name_or_path: Optional[str] = field(
-        default=None,
+        default='prajjwal1/bert-small',
         metadata={
             "help": "The model checkpoint for weights initialization."
                     "Don't set if you want to train a model from scratch."
@@ -106,7 +111,7 @@ class ModelArguments:
         }
     )
     mlp_only_train: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Use MLP only during training"
         }
@@ -142,11 +147,11 @@ class DataTrainingArguments:
 
     # SimCSE's arguments
     train_file: Optional[str] = field(
-        default=None,
+        default='data/wiki1m_for_simcse.txt',
         metadata={"help": "The training data file (.txt or .csv)."}
     )
     max_seq_length: Optional[int] = field(
-        default=32,
+        default=64,
         metadata={
             "help": "The maximum total input sequence length after tokenization. Sequences longer "
                     "than this will be truncated."
@@ -171,67 +176,6 @@ class DataTrainingArguments:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["csv", "json", "txt"], "`train_file` should be a csv, a json or a txt file."
-
-
-@dataclass
-class OurTrainingArguments(TrainingArguments):
-    # Evaluation
-    ## By default, we evaluate STS (dev) during training (for selecting best checkpoints) and evaluate 
-    ## both STS and transfer tasks (dev) at the end of training. Using --eval_transfer will allow evaluating
-    ## both STS and transfer tasks (dev) during training.
-    eval_transfer: bool = field(
-        default=False,
-        metadata={"help": "Evaluate transfer task dev sets (in validation)."}
-    )
-
-    save_total_limit: int = field(default=2)
-
-    @cached_property
-    @torch_required
-    def _setup_devices(self) -> "torch.device":
-        logger.info("PyTorch: setting up devices")
-        if self.no_cuda:
-            device = torch.device("cpu")
-            self._n_gpu = 0
-        elif is_torch_tpu_available():
-            device = xm.xla_device()
-            self._n_gpu = 0
-        elif self.local_rank == -1:
-            # if n_gpu is > 1 we'll use nn.DataParallel.
-            # If you only want to use a specific subset of GPUs use `CUDA_VISIBLE_DEVICES=0`
-            # Explicitly set CUDA to the first (index 0) CUDA device, otherwise `set_device` will
-            # trigger an error that a device index is missing. Index 0 takes into account the
-            # GPUs available in the environment, so `CUDA_VISIBLE_DEVICES=1,2` with `cuda:0`
-            # will use the first GPU in that env, i.e. GPU#1
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            # Sometimes the line in the postinit has not been run before we end up here, so just checking we're not at
-            # the default value.
-            self._n_gpu = torch.cuda.device_count()
-        else:
-            # Here, we'll use torch.distributed.
-            # Initializes the distributed backend which will take care of synchronizing nodes/GPUs
-            #
-            # deepspeed performs its own DDP internally, and requires the program to be started with:
-            # deepspeed  ./program.py
-            # rather than:
-            # python -m torch.distributed.launch --nproc_per_node=2 ./program.py
-            if self.deepspeed:
-                from .integrations import is_deepspeed_available
-
-                if not is_deepspeed_available():
-                    raise ImportError("--deepspeed requires deepspeed: `pip install deepspeed`.")
-                import deepspeed
-
-                deepspeed.init_distributed()
-            else:
-                torch.distributed.init_process_group(backend="nccl")
-            device = torch.device("cuda", self.local_rank)
-            self._n_gpu = 1
-
-        if device.type == "cuda":
-            torch.cuda.set_device(device)
-
-        return device
 
 
 def main():
@@ -527,56 +471,137 @@ def main():
 
     data_collator = default_data_collator if data_args.pad_to_max_length else OurDataCollatorWithPadding(tokenizer)
 
-    trainer = CLTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset if training_args.do_train else None,
-        tokenizer=tokenizer,
-        data_collator=data_collator,
-    )
-    trainer.model_args = model_args
-
     # Training
-    if training_args.do_train:
-        model_path = (
-            model_args.model_name_or_path
-            if (model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path))
-            else None
+
+    if not training_args.use_ray:
+        trainer = CLTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset if training_args.do_train else None,
+            tokenizer=tokenizer,
+            data_collator=data_collator,
         )
-        train_result = trainer.train(model_path=model_path)
-        trainer.save_model()  # Saves the tokenizer too for easy upload
+        trainer.model_args = model_args
 
-        output_train_file = os.path.join(training_args.output_dir, "train_results.txt")
-        if trainer.is_world_process_zero():
-            with open(output_train_file, "w") as writer:
-                logger.info("***** Train results *****")
-                for key, value in sorted(train_result.metrics.items()):
-                    logger.info(f"  {key} = {value}")
-                    writer.write(f"{key} = {value}\n")
+        if training_args.do_train:
+            model_path = (
+                model_args.model_name_or_path
+                if (model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path))
+                else None
+            )
+            train_result = trainer.train(model_path=model_path)
+            trainer.save_model()  # Saves the tokenizer too for easy upload
 
-            # Need to save the state, since Trainer.save_model saves only the tokenizer with the model
-            trainer.state.save_to_json(os.path.join(training_args.output_dir, "trainer_state.json"))
+            output_train_file = os.path.join(training_args.output_dir, "train_results.txt")
+            if trainer.is_world_process_zero():
+                with open(output_train_file, "w") as writer:
+                    logger.info("***** Train results *****")
+                    for key, value in sorted(train_result.metrics.items()):
+                        logger.info(f"  {key} = {value}")
+                        writer.write(f"{key} = {value}\n")
 
-    # Evaluation
-    results = {}
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
-        results = trainer.evaluate(eval_senteval_transfer=True)
+                # Need to save the state, since Trainer.save_model saves only the tokenizer with the model
+                trainer.state.save_to_json(os.path.join(training_args.output_dir, "trainer_state.json"))
 
-        output_eval_file = os.path.join(training_args.output_dir, "eval_results.txt")
-        if trainer.is_world_process_zero():
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                for key, value in sorted(results.items()):
-                    logger.info(f"  {key} = {value}")
-                    writer.write(f"{key} = {value}\n")
+        # Evaluation
+        results = {}
+        if training_args.do_eval:
+            logger.info("*** Evaluate ***")
+            results = trainer.evaluate(eval_senteval_transfer=True)
 
-    return results
+            output_eval_file = os.path.join(training_args.output_dir, "eval_results.txt")
+            if trainer.is_world_process_zero():
+                with open(output_eval_file, "w") as writer:
+                    logger.info("***** Eval results *****")
+                    for key, value in sorted(results.items()):
+                        logger.info(f"  {key} = {value}")
+                        writer.write(f"{key} = {value}\n")
 
+        return results
 
-def _mp_fn(index):
-    # For xla_spawn (TPUs)
-    main()
+    else:  # Assume training_args.do_train == true
+        def model_init_impl(best_model_checkpoint=None):  # Assume only BERT is used
+            return BertForCL.from_pretrained(
+                model_args.model_name_or_path if best_model_checkpoint is None else best_model_checkpoint,
+                from_tf=bool(".ckpt" in model_args.model_name_or_path),
+                config=config,
+                cache_dir=model_args.cache_dir,
+                revision=model_args.model_revision,
+                use_auth_token=True if model_args.use_auth_token else None,
+                model_args=model_args
+            )
+
+        def model_init():
+            return model_init_impl()
+
+        trainer = CLTrainer(
+            model_init=model_init,
+            args=training_args,
+            train_dataset=train_dataset if training_args.do_train else None,
+            tokenizer=tokenizer,
+            data_collator=data_collator,
+        )
+        trainer.model_args = model_args
+
+        ray.init(log_to_driver=False)
+
+        # Callback code, to let ray-tune run trainer evaluate for test-set at the end of the trial
+        class EndOfTrialCallback(Callback):
+            def on_trial_complete(self, iteration: int, trials: List["Trial"], trial: "Trial", **info):
+                # Save best model val-dataset accuracy
+                with open(trial.logdir + os.sep + "trial_best_model_val_result.txt", "w") as fp:
+                    # HF Trainer provided metric from "compute_objective" is saved always as "objective"
+                    fp.write(str(trial.metric_analysis["objective"][training_args.metric_direction[:3]]))
+
+                # Run and save best model for test-set accuracy
+                checkpoints_dir = None
+                for root, dirs, files in os.walk(trial.logdir):
+                    for directory in dirs:
+                        if directory == f"run-{trial.trial_id}":
+                            checkpoints_dir = trial.logdir + os.sep + directory
+
+                best_model_checkpoint = None
+                if checkpoints_dir:
+                    last_checkpoint = sorted(
+                        os.listdir(checkpoints_dir),
+                        key=lambda dirname: int(dirname.split('-')[1])
+                    )[-1]
+
+                    trainer_state_path = checkpoints_dir + os.sep + last_checkpoint + os.sep + "trainer_state.json"
+                    with open(trainer_state_path) as fp:
+                        trainer_state = json.load(fp)
+                        best_model_checkpoint_tmp = trainer_state['best_model_checkpoint']
+                        if "./" == best_model_checkpoint_tmp[:2]:
+                            best_model_checkpoint_tmp = best_model_checkpoint_tmp[2:]
+                        best_model_checkpoint = trial.logdir + os.sep + best_model_checkpoint_tmp
+
+                if best_model_checkpoint:
+                    local_trainer = CLTrainer(
+                        model=model_init_impl(best_model_checkpoint),
+                        args=training_args,
+                        data_collator=data_collator
+                    )
+
+                    with open(trial.logdir + os.sep + "trial_best_model_test_result.json", "w") as fp:
+                        fp.write(str(local_trainer.evaluate(eval_senteval_transfer=True)))
+
+        best_run = trainer.hyperparameter_search(
+            backend="ray",
+            hp_space=lambda _: {
+                "seed": tune.grid_search(training_args.tune_choice_seed),
+            },
+            compute_objective=lambda metrics: metrics[training_args.metric_for_best_model],
+            n_trials=training_args.num_samples,
+            direction=training_args.metric_direction,
+            resources_per_trial={"cpu": training_args.cpus_per_trial, "gpu": training_args.gpus_per_trial},
+            local_dir=training_args.local_dir,
+            search_alg=BasicVariantGenerator(max_concurrent=training_args.max_concurrent_trials),
+            scheduler=FIFOScheduler(),
+            log_to_file=True,
+            callbacks=[EndOfTrialCallback()]
+        )
+
+        logger.info(f"best_run.run_id/best_run.hyperparameters: [{best_run.run_id}/{best_run.hyperparameters}]")
 
 
 if __name__ == "__main__":

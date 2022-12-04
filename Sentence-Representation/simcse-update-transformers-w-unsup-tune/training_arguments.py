@@ -11,6 +11,7 @@ class OurTrainingArguments(TrainingArguments):
 
     # Trainer Arguments --
     output_dir: str = field(default='./')
+    overwrite_output_dir: bool = field(default=True)
 
     evaluation_strategy: str = field(default=STRATEGY)
     eval_steps: int = field(default=STRATEGY_STEPS)

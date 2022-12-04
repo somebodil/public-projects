@@ -270,9 +270,9 @@ def sentemb_forward(
 class BertForCL(BertPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
-    def __init__(self, config, *model_args, **model_kargs):
+    def __init__(self, config, *args, **kargs):
         super().__init__(config)
-        self.model_args = model_kargs["model_args"]
+        self.model_args = args[0]
         self.bert = BertModel(config, add_pooling_layer=False)
 
         if self.model_args.do_mlm:
@@ -333,9 +333,9 @@ class BertForCL(BertPreTrainedModel):
 class RobertaForCL(RobertaPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
-    def __init__(self, config, *model_args, **model_kargs):
+    def __init__(self, config, *args, **kwargs):
         super().__init__(config)
-        self.model_args = model_kargs["model_args"]
+        self.model_args = args[0]
         self.roberta = RobertaModel(config, add_pooling_layer=False)
 
         if self.model_args.do_mlm:

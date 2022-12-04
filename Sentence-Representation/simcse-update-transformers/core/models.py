@@ -195,13 +195,6 @@ def cl_forward(
         z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
         cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
 
-    # Print similarities when supervised learning && batch-size 128
-    if num_sent >= 3 and len(cos_sim[0]) == 256:
-        print(
-            f"Similarities: {cos_sim[0][0].item():.4f}, ..., {cos_sim[0][3].item():.4f}, {cos_sim[0][4].item():.4f}, {cos_sim[0][5].item():.4f}, ..., {cos_sim[0][128].item():.4f}, {cos_sim[0][129].item():.4f}, {cos_sim[0][130].item():.4f}, ...",
-            file=sys.stderr
-        )
-
     labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
     loss_fct = nn.CrossEntropyLoss()
 

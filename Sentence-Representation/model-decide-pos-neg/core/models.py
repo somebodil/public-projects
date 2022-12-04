@@ -189,40 +189,43 @@ def cl_forward(
         z1 = torch.cat(z1_list, 0)
         z2 = torch.cat(z2_list, 0)
 
-    cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))
-    # Hard negative
-    if num_sent >= 3:
-        z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
-        cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
+    if cls.is_classifier_train_time:
+        pass
+    else:
+        cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))
+        # Hard negative
+        if num_sent >= 3:
+            z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
+            cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
 
-    # Print similarities when supervised learning && batch-size 128
-    if num_sent >= 3 and len(cos_sim[0]) == 256:
-        print(
-            f"Similarities: {cos_sim[0][0].item():.4f}, ..., {cos_sim[0][3].item():.4f}, {cos_sim[0][4].item():.4f}, {cos_sim[0][5].item():.4f}, ..., {cos_sim[0][128].item():.4f}, {cos_sim[0][129].item():.4f}, {cos_sim[0][130].item():.4f}, ...",
-            file=sys.stderr
+        # Print similarities when supervised learning && batch-size 128
+        if num_sent >= 3 and len(cos_sim[0]) == 256:
+            print(
+                f"Similarities: {cos_sim[0][0].item():.4f}, ..., {cos_sim[0][3].item():.4f}, {cos_sim[0][4].item():.4f}, {cos_sim[0][5].item():.4f}, ..., {cos_sim[0][128].item():.4f}, {cos_sim[0][129].item():.4f}, {cos_sim[0][130].item():.4f}, ...",
+                file=sys.stderr
+            )
+
+        labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
+        loss_fct = nn.CrossEntropyLoss()
+
+        loss = loss_fct(cos_sim, labels)
+
+        # Calculate loss for MLM
+        if mlm_outputs is not None and mlm_labels is not None:
+            mlm_labels = mlm_labels.view(-1, mlm_labels.size(-1))
+            prediction_scores = cls.lm_head(mlm_outputs.last_hidden_state)
+            masked_lm_loss = loss_fct(prediction_scores.view(-1, cls.config.vocab_size), mlm_labels.view(-1))
+            loss = loss + cls.model_args.mlm_weight * masked_lm_loss
+
+        if not return_dict:
+            output = (cos_sim,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=cos_sim,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
         )
-
-    labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
-    loss_fct = nn.CrossEntropyLoss()
-
-    loss = loss_fct(cos_sim, labels)
-
-    # Calculate loss for MLM
-    if mlm_outputs is not None and mlm_labels is not None:
-        mlm_labels = mlm_labels.view(-1, mlm_labels.size(-1))
-        prediction_scores = cls.lm_head(mlm_outputs.last_hidden_state)
-        masked_lm_loss = loss_fct(prediction_scores.view(-1, cls.config.vocab_size), mlm_labels.view(-1))
-        loss = loss + cls.model_args.mlm_weight * masked_lm_loss
-
-    if not return_dict:
-        output = (cos_sim,) + outputs[2:]
-        return ((loss,) + output) if loss is not None else output
-    return SequenceClassifierOutput(
-        loss=loss,
-        logits=cos_sim,
-        hidden_states=outputs.hidden_states,
-        attentions=outputs.attentions,
-    )
 
 
 def sentemb_forward(
@@ -276,8 +279,8 @@ class BertForCL(BertPreTrainedModel):
         self.bert = BertModel(config, add_pooling_layer=False)
 
         # YYH --
-        self.eval_steps
         self.classifier = BertModel(config, add_pooling_layer=False)
+        self.is_classifier_train_time = True
         # --
 
         if self.model_args.do_mlm:

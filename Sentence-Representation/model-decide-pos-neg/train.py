@@ -117,6 +117,10 @@ class ModelArguments:
         }
     )
 
+    # YYH --
+    train_switch_step: int = field(default=125)  # Set half of "eval_steps" of training_arguments
+    # --
+
 
 @dataclass
 class DataTrainingArguments:

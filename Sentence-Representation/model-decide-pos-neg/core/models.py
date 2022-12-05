@@ -1,5 +1,3 @@
-import sys
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -189,23 +187,44 @@ def cl_forward(
         z1 = torch.cat(z1_list, 0)
         z2 = torch.cat(z2_list, 0)
 
+    cls.increment_and_switch()
     if cls.is_classifier_train_time:
-        pass
+        # unsqueeze and repeat z1, z2
+        z1 = z1.unsqueeze(1).repeat(1, batch_size, 1)
+        z2 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
+
+        # torch.cat z1 z2, and label
+        z_cat = torch.cat((z1, z2), dim=2)
+        labels = torch.eye(batch_size)
+
+        # reshape
+        z_cat = z_cat.reshape((z_cat.shape[0] * z_cat.shape[1], z_cat.shape[2]))
+        labels = labels.reshape((z_cat.shape[0] * z_cat.shape[1], z_cat.shape[2]))
+
+        predict = cls.classifier(z_cat)
+
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(predict, labels)
+
+        if not return_dict:
+            output = (cos_sim,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=predict,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
     else:
         cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))
+
         # Hard negative
         if num_sent >= 3:
             z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
             cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
 
-        # Print similarities when supervised learning && batch-size 128
-        if num_sent >= 3 and len(cos_sim[0]) == 256:
-            print(
-                f"Similarities: {cos_sim[0][0].item():.4f}, ..., {cos_sim[0][3].item():.4f}, {cos_sim[0][4].item():.4f}, {cos_sim[0][5].item():.4f}, ..., {cos_sim[0][128].item():.4f}, {cos_sim[0][129].item():.4f}, {cos_sim[0][130].item():.4f}, ...",
-                file=sys.stderr
-            )
-
-        labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
+        labels = torch.arange(batch_size).long().to(cls.device)
         loss_fct = nn.CrossEntropyLoss()
 
         loss = loss_fct(cos_sim, labels)
@@ -279,14 +298,31 @@ class BertForCL(BertPreTrainedModel):
         self.bert = BertModel(config, add_pooling_layer=False)
 
         # YYH --
-        self.classifier = BertModel(config, add_pooling_layer=False)
+        hs = config.hidden_size * 2
+        self.classifier = nn.Sequential(
+            nn.Linear(hs, hs),
+            nn.ReLU(),
+            nn.Linear(hs, hs),
+            nn.ReLU(),
+            nn.Linear(hs, hs),
+            nn.ReLU(),
+            nn.Linear(hs, 2),
+        )
         self.is_classifier_train_time = True
+        self.counter = 0
+        self.train_switch_step = self.model_args.train_switch_step
         # --
 
         if self.model_args.do_mlm:
             self.lm_head = BertLMPredictionHead(config)
 
         cl_init(self, config)
+
+    def increment_and_switch(self):
+        self.counter += 1
+
+        if self.counter % self.train_switch_step == 0:
+            self.is_classifier_train_time = not self.is_classifier_train_time
 
     def forward(
             self,
@@ -351,21 +387,22 @@ class RobertaForCL(RobertaPreTrainedModel):
 
         cl_init(self, config)
 
-    def forward(self,
-                input_ids=None,
-                attention_mask=None,
-                token_type_ids=None,
-                position_ids=None,
-                head_mask=None,
-                inputs_embeds=None,
-                labels=None,
-                output_attentions=None,
-                output_hidden_states=None,
-                return_dict=None,
-                sent_emb=False,
-                mlm_input_ids=None,
-                mlm_labels=None,
-                ):
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
+            sent_emb=False,
+            mlm_input_ids=None,
+            mlm_labels=None,
+    ):
         if sent_emb:
             return sentemb_forward(
                 self,

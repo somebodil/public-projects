@@ -24,7 +24,7 @@ class OurTrainingArguments(TrainingArguments):
     metric_for_best_model: str = field(default='eval_stsb_spearman')
 
     num_train_epochs: int = field(default=1)
-    per_device_train_batch_size: int = field(default=64)
+    per_device_train_batch_size: int = field(default=32)
 
     seed: int = field(default=42)
     fp16: bool = field(default=True)
@@ -40,7 +40,7 @@ class OurTrainingArguments(TrainingArguments):
     eval_transfer: bool = field(default=False)
 
     # Ray Tune Arguments --
-    use_ray: bool = field(default=True)
+    use_ray: bool = field(default=False)
     local_dir: str = field(default='./ray_results/')
     num_samples: int = field(default=1)  # Will be ignored because "tune.grid_search" is used
     metric_direction: str = field(default='maximize')  # Should be 'maximize' or 'minimize'

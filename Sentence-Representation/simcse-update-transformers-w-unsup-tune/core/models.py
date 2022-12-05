@@ -1,5 +1,3 @@
-import sys
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -190,6 +188,7 @@ def cl_forward(
         z2 = torch.cat(z2_list, 0)
 
     cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))
+
     # Hard negative
     if num_sent >= 3:
         z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
@@ -336,21 +335,22 @@ class RobertaForCL(RobertaPreTrainedModel):
 
         cl_init(self, config)
 
-    def forward(self,
-                input_ids=None,
-                attention_mask=None,
-                token_type_ids=None,
-                position_ids=None,
-                head_mask=None,
-                inputs_embeds=None,
-                labels=None,
-                output_attentions=None,
-                output_hidden_states=None,
-                return_dict=None,
-                sent_emb=False,
-                mlm_input_ids=None,
-                mlm_labels=None,
-                ):
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None,
+            sent_emb=False,
+            mlm_input_ids=None,
+            mlm_labels=None,
+    ):
         if sent_emb:
             return sentemb_forward(
                 self,

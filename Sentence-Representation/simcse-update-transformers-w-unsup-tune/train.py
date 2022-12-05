@@ -523,12 +523,12 @@ def main():
         def model_init_impl(best_model_checkpoint=None):  # Assume only BERT is used
             return BertForCL.from_pretrained(
                 model_args.model_name_or_path if best_model_checkpoint is None else best_model_checkpoint,
+                model_args,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
                 cache_dir=model_args.cache_dir,
                 revision=model_args.model_revision,
                 use_auth_token=True if model_args.use_auth_token else None,
-                model_args=model_args
             )
 
         def model_init():

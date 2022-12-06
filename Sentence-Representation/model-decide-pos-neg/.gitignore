@@ -142,3 +142,6 @@ wiki1m_for_simcse.txt
 
 # ray results
 /ray_results
+
+# standalone_results
+/standalone_results

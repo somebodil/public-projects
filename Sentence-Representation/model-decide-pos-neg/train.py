@@ -118,7 +118,8 @@ class ModelArguments:
     )
 
     # YYH --
-    train_switch_step: int = field(default=125)  # Set half of "eval_steps" of training_arguments
+    train_classifier_interval: int = field(default=875)
+    train_encoder_interval: int = field(default=125)
     # --
 
 

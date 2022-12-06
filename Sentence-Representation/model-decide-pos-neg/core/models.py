@@ -188,26 +188,29 @@ def cl_forward(
         z2 = torch.cat(z2_list, 0)
 
     cls.increment_and_switch()
+    cls.classifier.to(cls.device)
+
     if cls.is_classifier_train_time:
-        # unsqueeze and repeat z1, z2
-        z1 = z1.unsqueeze(1).repeat(1, batch_size, 1)
-        z2 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
+        # Unsqueeze and repeat z1, z2
+        z3 = z1.unsqueeze(1).repeat(1, batch_size, 1)
+        z4 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
 
-        # torch.cat z1 z2, and label
-        z_cat = torch.cat((z1, z2), dim=2)
-        labels = torch.eye(batch_size)
-
-        # reshape
-        z_cat = z_cat.reshape((z_cat.shape[0] * z_cat.shape[1], z_cat.shape[2]))
-        labels = labels.reshape((z_cat.shape[0] * z_cat.shape[1], z_cat.shape[2]))
-
+        # Torch.cat z1 z2, predict
+        z_cat = torch.cat((z3, z4), dim=-1)
         predict = cls.classifier(z_cat)
 
-        loss_fct = nn.CrossEntropyLoss()
+        # Labels
+        labels = torch.eye(batch_size).long().to(cls.device)
+
+        # reshape
+        predict = predict.reshape(batch_size * batch_size, 2)
+        labels = labels.reshape(batch_size * batch_size)
+
+        loss_fct = nn.CrossEntropyLoss(weight=torch.FloatTensor([1 / (batch_size - 1), 1]).to(cls.device))
         loss = loss_fct(predict, labels)
 
         if not return_dict:
-            output = (cos_sim,) + outputs[2:]
+            output = (predict,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
         return SequenceClassifierOutput(
             loss=loss,
@@ -224,10 +227,16 @@ def cl_forward(
             z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
             cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
 
-        labels = torch.arange(batch_size).long().to(cls.device)
-        loss_fct = nn.CrossEntropyLoss()
+        z3 = z1.unsqueeze(1).repeat(1, batch_size, 1)
+        z4 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
+        z_cat = torch.cat((z3, z4), dim=-1)
+        predict = cls.classifier(z_cat)
+        pseudo_labels = predict.argmax(-1)
 
-        loss = loss_fct(cos_sim, labels)
+        normalized_pseudo_labels = pseudo_labels.transpose(-2, -1).divide(pseudo_labels.sum(dim=-1)).transpose(-2, -1)
+
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(cos_sim, normalized_pseudo_labels)
 
         # Calculate loss for MLM
         if mlm_outputs is not None and mlm_labels is not None:
@@ -298,19 +307,19 @@ class BertForCL(BertPreTrainedModel):
         self.bert = BertModel(config, add_pooling_layer=False)
 
         # YYH --
-        hs = config.hidden_size * 2
+        hidden_size = 512
+        output_size = 2
         self.classifier = nn.Sequential(
-            nn.Linear(hs, hs),
-            nn.ReLU(),
-            nn.Linear(hs, hs),
-            nn.ReLU(),
-            nn.Linear(hs, hs),
-            nn.ReLU(),
-            nn.Linear(hs, 2),
+            nn.Linear(config.hidden_size * 2, hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(hidden_size, output_size),
+            nn.LeakyReLU(),
         )
         self.is_classifier_train_time = True
-        self.counter = 0
-        self.train_switch_step = self.model_args.train_switch_step
+        self.classifier_counter = 0
+        self.encoder_counter = 0
         # --
 
         if self.model_args.do_mlm:
@@ -318,11 +327,25 @@ class BertForCL(BertPreTrainedModel):
 
         cl_init(self, config)
 
-    def increment_and_switch(self):
-        self.counter += 1
-
-        if self.counter % self.train_switch_step == 0:
+    def try_switch(self, counter, interval):
+        if counter % interval == 0:
             self.is_classifier_train_time = not self.is_classifier_train_time
+
+            if not self.is_classifier_train_time:
+                for p in self.classifier.parameters():
+                    p.requires_grad = False
+            else:
+                for p in self.classifier.parameters():
+                    p.requires_grad = True
+
+    def increment_and_switch(self):
+        if self.is_classifier_train_time:
+            self.classifier_counter += 1
+            self.try_switch(self.classifier_counter, self.model_args.train_classifier_interval)
+
+        else:
+            self.encoder_counter += 1
+            self.try_switch(self.encoder_counter, self.model_args.train_encoder_interval)
 
     def forward(
             self,

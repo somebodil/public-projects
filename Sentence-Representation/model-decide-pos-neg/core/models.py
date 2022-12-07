@@ -1,5 +1,4 @@
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from transformers.modeling_outputs import SequenceClassifierOutput, BaseModelOutputWithPoolingAndCrossAttentions
 from transformers.models.bert.modeling_bert import BertPreTrainedModel, BertModel, BertLMPredictionHead
@@ -90,29 +89,26 @@ def cl_init(cls, config):
     cls.init_weights()
 
 
-def cl_forward(
+def encode(
         cls,
         encoder,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        mlm_input_ids=None,
-        mlm_labels=None,
+        input_ids,
+        attention_mask,
+        token_type_ids,
+        position_ids,
+        head_mask,
+        inputs_embeds,
+        output_attentions,
+        return_dict
 ):
     return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
+
     batch_size = input_ids.size(0)
+
     # Number of sentences in one instance
     # 2: pair instance; 3: pair instance with a hard negative
     num_sent = input_ids.size(1)
 
-    mlm_outputs = None
     # Flatten input for encoding
     input_ids = input_ids.view((-1, input_ids.size(-1)))  # (bs * num_sent, len)
     attention_mask = attention_mask.view((-1, attention_mask.size(-1)))  # (bs * num_sent len)
@@ -132,71 +128,62 @@ def cl_forward(
         return_dict=True,
     )
 
-    # MLM auxiliary objective
-    if mlm_input_ids is not None:
-        mlm_input_ids = mlm_input_ids.view((-1, mlm_input_ids.size(-1)))
-        mlm_outputs = encoder(
-            mlm_input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=True if cls.model_args.pooler_type in ['avg_top2', 'avg_first_last'] else False,
-            return_dict=True,
-        )
-
     # Pooling
     pooler_output = cls.pooler(attention_mask, outputs)
     pooler_output = pooler_output.view((batch_size, num_sent, pooler_output.size(-1)))  # (bs, num_sent, hidden)
 
-    # If using "cls", we add an extra MLP layer
-    # (same as BERT's original implementation) over the representation.
-    if cls.pooler_type == "cls":
-        pooler_output = cls.mlp(pooler_output)
+    # If using "cls", we add an extra MLP layer (same as BERT's original implementation) over the representation.
+    # if cls.pooler_type == "cls":
+    #     pooler_output = cls.mlp(pooler_output)
 
     # Separate representation
     z1, z2 = pooler_output[:, 0], pooler_output[:, 1]
 
     # Hard negative
+    z3 = None
     if num_sent == 3:
         z3 = pooler_output[:, 2]
 
-    # Gather all embeddings if using distributed training
-    if dist.is_initialized() and cls.training:
-        # Gather hard negative
-        if num_sent >= 3:
-            z3_list = [torch.zeros_like(z3) for _ in range(dist.get_world_size())]
-            dist.all_gather(tensor_list=z3_list, tensor=z3.contiguous())
-            z3_list[dist.get_rank()] = z3
-            z3 = torch.cat(z3_list, 0)
+    # Torch.cat z1 z2
+    z_cat = torch.cat((z1.unsqueeze(1).repeat(1, batch_size, 1), z2.unsqueeze(0).repeat(batch_size, 1, 1)), dim=-1)
+    return z1, z2, z3, z_cat, outputs, batch_size, num_sent, return_dict
 
-        # Dummy vectors for allgather
-        z1_list = [torch.zeros_like(z1) for _ in range(dist.get_world_size())]
-        z2_list = [torch.zeros_like(z2) for _ in range(dist.get_world_size())]
-        # Allgather
-        dist.all_gather(tensor_list=z1_list, tensor=z1.contiguous())
-        dist.all_gather(tensor_list=z2_list, tensor=z2.contiguous())
 
-        # Since allgather results do not have gradients, we replace the
-        # current process's corresponding embeddings with original tensors
-        z1_list[dist.get_rank()] = z1
-        z2_list[dist.get_rank()] = z2
-        # Get full batch embeddings: (bs x N, hidden)
-        z1 = torch.cat(z1_list, 0)
-        z2 = torch.cat(z2_list, 0)
-
+def cl_forward(
+        cls,
+        encoder,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        mlm_input_ids=None,
+        mlm_labels=None,
+):
     cls.increment_and_switch()
     cls.classifier.to(cls.device)
 
     if cls.is_classifier_train_time:
-        # Unsqueeze and repeat z1, z2
-        z3 = z1.unsqueeze(1).repeat(1, batch_size, 1)
-        z4 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
+        with torch.no_grad():
+            z1, z2, z3, z_cat, outputs, batch_size, num_sent, return_dict = encode(
+                cls,
+                encoder,
+                input_ids,
+                attention_mask,
+                token_type_ids,
+                position_ids,
+                head_mask,
+                inputs_embeds,
+                output_attentions,
+                return_dict
+            )
 
-        # Torch.cat z1 z2, predict
-        z_cat = torch.cat((z3, z4), dim=-1)
+        # predict
         predict = cls.classifier(z_cat)
 
         # Labels
@@ -209,6 +196,8 @@ def cl_forward(
         loss_fct = nn.CrossEntropyLoss(weight=torch.FloatTensor([1 / (batch_size - 1), 1]).to(cls.device))
         loss = loss_fct(predict, labels)
 
+        print(f"classifier training loss: {loss.item()}")
+
         if not return_dict:
             output = (predict,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
@@ -220,6 +209,19 @@ def cl_forward(
         )
 
     else:
+        z1, z2, z3, z_cat, outputs, batch_size, num_sent, return_dict = encode(
+            cls,
+            encoder,
+            input_ids,
+            attention_mask,
+            token_type_ids,
+            position_ids,
+            head_mask,
+            inputs_embeds,
+            output_attentions,
+            return_dict
+        )
+
         cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0))
 
         # Hard negative
@@ -227,23 +229,29 @@ def cl_forward(
             z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
             cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
 
-        z3 = z1.unsqueeze(1).repeat(1, batch_size, 1)
-        z4 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
-        z_cat = torch.cat((z3, z4), dim=-1)
-        predict = cls.classifier(z_cat)
-        pseudo_labels = predict.argmax(-1)
+        with torch.no_grad():
+            z_cat = torch.cat(
+                (z1.unsqueeze(1).repeat(1, batch_size, 1), z2.unsqueeze(0).repeat(batch_size, 1, 1)),
+                dim=-1
+            )
 
-        normalized_pseudo_labels = pseudo_labels.transpose(-2, -1).divide(pseudo_labels.sum(dim=-1)).transpose(-2, -1)
+            predict = cls.classifier(z_cat)
+
+            pseudo_labels = predict.argmax(-1)
+
+            if pseudo_labels.diag().sum() < 25:
+                print(f"pseudo_labels.diag().sum(): {pseudo_labels.diag().sum()}")
+                print(f"pseudo_labels.sum(dim=-1)[0:10]: {pseudo_labels.sum(dim=-1)[0:10]}")
+                print(f"pseudo_labels.sum(dim=-1)[10:20]: {pseudo_labels.sum(dim=-1)[10:20]}")
+                print(f"pseudo_labels.sum(dim=-1)[20:32]: {pseudo_labels.sum(dim=-1)[20:32]}")
+
+            normalized_pseudo_labels = pseudo_labels \
+                .transpose(-2, -1) \
+                .divide(pseudo_labels.sum(dim=-1)) \
+                .transpose(-2, -1)
 
         loss_fct = nn.CrossEntropyLoss()
         loss = loss_fct(cos_sim, normalized_pseudo_labels)
-
-        # Calculate loss for MLM
-        if mlm_outputs is not None and mlm_labels is not None:
-            mlm_labels = mlm_labels.view(-1, mlm_labels.size(-1))
-            prediction_scores = cls.lm_head(mlm_outputs.last_hidden_state)
-            masked_lm_loss = loss_fct(prediction_scores.view(-1, cls.config.vocab_size), mlm_labels.view(-1))
-            loss = loss + cls.model_args.mlm_weight * masked_lm_loss
 
         if not return_dict:
             output = (cos_sim,) + outputs[2:]
@@ -285,8 +293,8 @@ def sentemb_forward(
     )
 
     pooler_output = cls.pooler(attention_mask, outputs)
-    if cls.pooler_type == "cls" and not cls.model_args.mlp_only_train:
-        pooler_output = cls.mlp(pooler_output)
+    # if cls.pooler_type == "cls" and not cls.model_args.mlp_only_train:
+    #     pooler_output = cls.mlp(pooler_output)
 
     if not return_dict:
         return (outputs[0], pooler_output) + outputs[2:]
@@ -307,16 +315,10 @@ class BertForCL(BertPreTrainedModel):
         self.bert = BertModel(config, add_pooling_layer=False)
 
         # YYH --
-        hidden_size = 512
-        output_size = 2
-        self.classifier = nn.Sequential(
-            nn.Linear(config.hidden_size * 2, hidden_size),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_size, output_size),
-            nn.LeakyReLU(),
-        )
+        self.classifier = None
+        self.classifier_input_size = config.hidden_size * 2
+        self.classifier_model_init()
+
         self.is_classifier_train_time = True
         self.classifier_counter = 0
         self.encoder_counter = 0
@@ -327,16 +329,31 @@ class BertForCL(BertPreTrainedModel):
 
         cl_init(self, config)
 
+    def classifier_model_init(self):
+        hidden_size = 512
+        output_size = 2
+        if not self.classifier:
+            self.classifier = nn.Sequential(
+                nn.Linear(self.classifier_input_size, hidden_size),
+                nn.LeakyReLU(),
+                nn.Linear(hidden_size, hidden_size),
+                nn.LeakyReLU(),
+                nn.Linear(hidden_size, output_size),
+                nn.LeakyReLU(),
+            )
+        else:
+            def weight_reset(m):
+                if isinstance(m, nn.Linear):
+                    m.reset_parameters()
+
+            self.classifier.apply(weight_reset)
+
     def try_switch(self, counter, interval):
         if counter % interval == 0:
             self.is_classifier_train_time = not self.is_classifier_train_time
 
-            if not self.is_classifier_train_time:
-                for p in self.classifier.parameters():
-                    p.requires_grad = False
-            else:
-                for p in self.classifier.parameters():
-                    p.requires_grad = True
+            if self.is_classifier_train_time:
+                self.classifier_model_init()
 
     def increment_and_switch(self):
         if self.is_classifier_train_time:

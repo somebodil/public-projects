@@ -7,7 +7,7 @@ from transformers import TrainingArguments
 @dataclass
 class OurTrainingArguments(TrainingArguments):
     STRATEGY = 'steps'
-    STRATEGY_STEPS = 875 + 125
+    STRATEGY_STEPS = 1000
 
     # Trainer Arguments --
     output_dir: str = field(default='./standalone_results')

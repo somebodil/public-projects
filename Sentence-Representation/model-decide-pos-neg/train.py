@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import sys
@@ -10,7 +9,6 @@ import torch
 import transformers
 from datasets import load_dataset
 from ray import tune
-from ray.tune import Callback
 from ray.tune.schedulers import FIFOScheduler
 from ray.tune.search import BasicVariantGenerator
 from transformers import (
@@ -116,11 +114,6 @@ class ModelArguments:
             "help": "Use MLP only during training"
         }
     )
-
-    # YYH --
-    train_classifier_interval: int = field(default=875)
-    train_encoder_interval: int = field(default=125)
-    # --
 
 
 @dataclass
@@ -294,6 +287,7 @@ def main():
             model = RobertaForCL.from_pretrained(
                 model_args.model_name_or_path,
                 model_args,
+                training_args,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
                 cache_dir=model_args.cache_dir,
@@ -304,6 +298,7 @@ def main():
             model = BertForCL.from_pretrained(
                 model_args.model_name_or_path,
                 model_args,
+                training_args,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
                 cache_dir=model_args.cache_dir,
@@ -529,6 +524,7 @@ def main():
             return BertForCL.from_pretrained(
                 model_args.model_name_or_path if best_model_checkpoint is None else best_model_checkpoint,
                 model_args,
+                training_args,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
                 cache_dir=model_args.cache_dir,
@@ -551,49 +547,52 @@ def main():
         ray.init(log_to_driver=False)
 
         # Callback code, to let ray-tune run trainer evaluate for test-set at the end of the trial
-        class EndOfTrialCallback(Callback):
-            def on_trial_complete(self, iteration: int, trials: List["Trial"], trial: "Trial", **info):
-                # Save best model val-dataset accuracy
-                with open(trial.logdir + os.sep + "trial_best_model_val_result.txt", "w") as fp:
-                    # HF Trainer provided metric from "compute_objective" is saved always as "objective"
-                    fp.write(str(trial.metric_analysis["objective"][training_args.metric_direction[:3]]))
-
-                # Run and save best model for test-set accuracy
-                checkpoints_dir = None
-                for root, dirs, files in os.walk(trial.logdir):
-                    for directory in dirs:
-                        if directory == f"run-{trial.trial_id}":
-                            checkpoints_dir = trial.logdir + os.sep + directory
-
-                best_model_checkpoint = None
-                if checkpoints_dir:
-                    last_checkpoint = sorted(
-                        os.listdir(checkpoints_dir),
-                        key=lambda dirname: int(dirname.split('-')[1])
-                    )[-1]
-
-                    trainer_state_path = checkpoints_dir + os.sep + last_checkpoint + os.sep + "trainer_state.json"
-                    with open(trainer_state_path) as fp:
-                        trainer_state = json.load(fp)
-                        best_model_checkpoint_tmp = trainer_state['best_model_checkpoint']
-                        if "./" == best_model_checkpoint_tmp[:2]:
-                            best_model_checkpoint_tmp = best_model_checkpoint_tmp[2:]
-                        best_model_checkpoint = trial.logdir + os.sep + best_model_checkpoint_tmp
-
-                if best_model_checkpoint:
-                    local_trainer = CLTrainer(
-                        model=model_init_impl(best_model_checkpoint),
-                        args=training_args,
-                        data_collator=data_collator
-                    )
-
-                    with open(trial.logdir + os.sep + "trial_best_model_test_result.json", "w") as fp:
-                        fp.write(str(local_trainer.evaluate(eval_senteval_transfer=True)))
+        # class EndOfTrialCallback(Callback):
+        #     def on_trial_complete(self, iteration: int, trials: List["Trial"], trial: "Trial", **info):
+        #         # Save best model val-dataset accuracy
+        #         with open(trial.logdir + os.sep + "trial_best_model_val_result.txt", "w") as fp:
+        #             # HF Trainer provided metric from "compute_objective" is saved always as "objective"
+        #             fp.write(str(trial.metric_analysis["objective"][training_args.metric_direction[:3]]))
+        #
+        #         # Run and save best model for test-set accuracy
+        #         checkpoints_dir = None
+        #         for root, dirs, files in os.walk(trial.logdir):
+        #             for directory in dirs:
+        #                 if directory == f"run-{trial.trial_id}":
+        #                     checkpoints_dir = trial.logdir + os.sep + directory
+        #
+        #         best_model_checkpoint = None
+        #         if checkpoints_dir:
+        #             last_checkpoint = sorted(
+        #                 os.listdir(checkpoints_dir),
+        #                 key=lambda dirname: int(dirname.split('-')[1])
+        #             )[-1]
+        #
+        #             trainer_state_path = checkpoints_dir + os.sep + last_checkpoint + os.sep + "trainer_state.json"
+        #             with open(trainer_state_path) as fp:
+        #                 trainer_state = json.load(fp)
+        #                 best_model_checkpoint_tmp = trainer_state['best_model_checkpoint']
+        #                 if "./" == best_model_checkpoint_tmp[:2]:
+        #                     best_model_checkpoint_tmp = best_model_checkpoint_tmp[2:]
+        #                 best_model_checkpoint = trial.logdir + os.sep + best_model_checkpoint_tmp
+        #
+        #         if best_model_checkpoint:
+        #             local_trainer = CLTrainer(
+        #                 model=model_init_impl(best_model_checkpoint),
+        #                 args=training_args,
+        #                 data_collator=data_collator
+        #             )
+        #
+        #             with open(trial.logdir + os.sep + "trial_best_model_test_result.json", "w") as fp:
+        #                 fp.write(str(local_trainer.evaluate(eval_senteval_transfer=True)))
 
         best_run = trainer.hyperparameter_search(
             backend="ray",
             hp_space=lambda _: {
-                "seed": tune.grid_search(training_args.tune_choice_seed),
+                # "seed": tune.grid_search(training_args.tune_choice_seed),
+                "classifier_loss_limit": tune.grid_search(training_args.tune_classifier_loss_limit),
+                "pseudo_label_window_range": tune.grid_search(training_args.tune_pseudo_label_window_range),
+                "per_device_train_batch_size": tune.grid_search(training_args.tune_per_device_train_batch_size),
             },
             compute_objective=lambda metrics: metrics[training_args.metric_for_best_model],
             n_trials=training_args.num_samples,
@@ -603,7 +602,7 @@ def main():
             search_alg=BasicVariantGenerator(max_concurrent=training_args.max_concurrent_trials),
             scheduler=FIFOScheduler(),
             log_to_file=True,
-            callbacks=[EndOfTrialCallback()]
+            # callbacks=[EndOfTrialCallback()]
         )
 
         logger.info(f"best_run.run_id/best_run.hyperparameters: [{best_run.run_id}/{best_run.hyperparameters}]")

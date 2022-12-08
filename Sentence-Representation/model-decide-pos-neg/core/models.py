@@ -145,7 +145,9 @@ def encode(
         z3 = pooler_output[:, 2]
 
     # Torch.cat z1 z2
-    z_cat = torch.cat((z1.unsqueeze(1).repeat(1, batch_size, 1), z2.unsqueeze(0).repeat(batch_size, 1, 1)), dim=-1)
+    t1 = z1.unsqueeze(1).repeat(1, batch_size, 1)
+    t2 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
+    z_cat = torch.cat((t1, t2, (t1 - t2).abs()), dim=-1)
     return z1, z2, z3, z_cat, outputs, batch_size, num_sent, return_dict
 
 
@@ -165,7 +167,7 @@ def cl_forward(
         mlm_input_ids=None,
         mlm_labels=None,
 ):
-    cls.increment_and_switch()
+    cls.try_switch()
     cls.classifier.to(cls.device)
 
     if cls.is_classifier_train_time:
@@ -193,10 +195,16 @@ def cl_forward(
         predict = predict.reshape(batch_size * batch_size, 2)
         labels = labels.reshape(batch_size * batch_size)
 
-        loss_fct = nn.CrossEntropyLoss(weight=torch.FloatTensor([1 / (batch_size - 1), 1]).to(cls.device))
-        loss = loss_fct(predict, labels)
+        class_weight = torch.FloatTensor([1 / (batch_size - 1), 1]).to(cls.device)
+        loss_fct = nn.CrossEntropyLoss(weight=class_weight)
 
-        print(f"classifier training loss: {loss.item()}")
+        loss = loss_fct(predict, labels)
+        loss_val = loss.item()
+
+        print(f"\nclassifier training loss: {loss_val}")
+
+        if loss_val < cls.training_args.classifier_loss_limit:
+            cls.force_switch_to_encoder()
 
         if not return_dict:
             output = (predict,) + outputs[2:]
@@ -230,28 +238,23 @@ def cl_forward(
             cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
 
         with torch.no_grad():
-            z_cat = torch.cat(
-                (z1.unsqueeze(1).repeat(1, batch_size, 1), z2.unsqueeze(0).repeat(batch_size, 1, 1)),
-                dim=-1
-            )
-
             predict = cls.classifier(z_cat)
+            labels = predict.argmax(-1)
 
-            pseudo_labels = predict.argmax(-1)
+            if not ((batch_size - cls.training_args.pseudo_label_window_range)
+                    <= labels.sum().item()
+                    <= (batch_size + cls.training_args.pseudo_label_window_range)):
+                print(f"\npseudo-label: [{labels.sum().item()}], use original label")
+                labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
+                cls.force_switch_to_classifier()
 
-            if pseudo_labels.diag().sum() < 25:
-                print(f"pseudo_labels.diag().sum(): {pseudo_labels.diag().sum()}")
-                print(f"pseudo_labels.sum(dim=-1)[0:10]: {pseudo_labels.sum(dim=-1)[0:10]}")
-                print(f"pseudo_labels.sum(dim=-1)[10:20]: {pseudo_labels.sum(dim=-1)[10:20]}")
-                print(f"pseudo_labels.sum(dim=-1)[20:32]: {pseudo_labels.sum(dim=-1)[20:32]}")
-
-            normalized_pseudo_labels = pseudo_labels \
-                .transpose(-2, -1) \
-                .divide(pseudo_labels.sum(dim=-1)) \
-                .transpose(-2, -1)
+            else:
+                print(f"\npseudo-label: [{labels.sum().item()}, {labels.sum(dim=-1).tolist()}], use pseudo-label")
+                labels = labels.transpose(-2, -1).divide(labels.sum(dim=-1)).transpose(-2, -1)
+                labels[labels != labels] = 0
 
         loss_fct = nn.CrossEntropyLoss()
-        loss = loss_fct(cos_sim, normalized_pseudo_labels)
+        loss = loss_fct(cos_sim, labels)
 
         if not return_dict:
             output = (cos_sim,) + outputs[2:]
@@ -312,11 +315,12 @@ class BertForCL(BertPreTrainedModel):
     def __init__(self, config, *args, **kargs):
         super().__init__(config)
         self.model_args = args[0]
+        self.training_args = args[1]
         self.bert = BertModel(config, add_pooling_layer=False)
 
         # YYH --
         self.classifier = None
-        self.classifier_input_size = config.hidden_size * 2
+        self.classifier_input_size = config.hidden_size * 3
         self.classifier_model_init()
 
         self.is_classifier_train_time = True
@@ -330,9 +334,9 @@ class BertForCL(BertPreTrainedModel):
         cl_init(self, config)
 
     def classifier_model_init(self):
-        hidden_size = 512
-        output_size = 2
         if not self.classifier:
+            hidden_size = 512
+            output_size = 2
             self.classifier = nn.Sequential(
                 nn.Linear(self.classifier_input_size, hidden_size),
                 nn.LeakyReLU(),
@@ -341,28 +345,34 @@ class BertForCL(BertPreTrainedModel):
                 nn.Linear(hidden_size, output_size),
                 nn.LeakyReLU(),
             )
-        else:
-            def weight_reset(m):
-                if isinstance(m, nn.Linear):
-                    m.reset_parameters()
 
-            self.classifier.apply(weight_reset)
+    def force_switch_to_classifier(self):
+        self.encoder_counter += (
+                self.training_args.train_encoder_interval
+                - (self.encoder_counter % self.training_args.train_encoder_interval)
+        )
 
-    def try_switch(self, counter, interval):
+        self.is_classifier_train_time = True
+
+    def force_switch_to_encoder(self):
+        self.classifier_counter += (
+                self.training_args.train_classifier_interval
+                - (self.classifier_counter % self.training_args.train_classifier_interval)
+        )
+        self.is_classifier_train_time = False
+
+    def _try_switch(self, counter, interval):
         if counter % interval == 0:
             self.is_classifier_train_time = not self.is_classifier_train_time
 
-            if self.is_classifier_train_time:
-                self.classifier_model_init()
-
-    def increment_and_switch(self):
+    def try_switch(self):
         if self.is_classifier_train_time:
             self.classifier_counter += 1
-            self.try_switch(self.classifier_counter, self.model_args.train_classifier_interval)
+            self._try_switch(self.classifier_counter, self.training_args.train_classifier_interval)
 
         else:
             self.encoder_counter += 1
-            self.try_switch(self.encoder_counter, self.model_args.train_encoder_interval)
+            self._try_switch(self.encoder_counter, self.training_args.train_encoder_interval)
 
     def forward(
             self,

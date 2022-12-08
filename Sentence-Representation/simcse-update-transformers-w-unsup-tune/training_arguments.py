@@ -34,7 +34,6 @@ class OurTrainingArguments(TrainingArguments):
     ray_scope: Optional[str] = field(default="all")
 
     # Trainer Arguments (WANT TO REMOVE) --
-
     do_train: bool = field(default=True)
     do_eval: bool = field(default=True)
     eval_transfer: bool = field(default=False)

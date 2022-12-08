@@ -147,7 +147,7 @@ def encode(
     # Torch.cat z1 z2
     t1 = z1.unsqueeze(1).repeat(1, batch_size, 1)
     t2 = z2.unsqueeze(0).repeat(batch_size, 1, 1)
-    z_cat = torch.cat((t1, t2, (t1 - t2).abs()), dim=-1)
+    z_cat = torch.cat((t1, t2, (t1 - t2).abs(), (t1 * t2)), dim=-1)
     return z1, z2, z3, z_cat, outputs, batch_size, num_sent, return_dict
 
 
@@ -204,7 +204,7 @@ def cl_forward(
         print(f"\nclassifier training loss: {loss_val}")
 
         if loss_val < cls.training_args.classifier_loss_limit:
-            cls.force_switch_to_encoder()
+            cls.force_switch()
 
         if not return_dict:
             output = (predict,) + outputs[2:]
@@ -246,7 +246,7 @@ def cl_forward(
                     <= (batch_size + cls.training_args.pseudo_label_window_range)):
                 print(f"\npseudo-label: [{labels.sum().item()}], use original label")
                 labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
-                cls.force_switch_to_classifier()
+                cls.force_switch()
 
             else:
                 print(f"\npseudo-label: [{labels.sum().item()}, {labels.sum(dim=-1).tolist()}], use pseudo-label")
@@ -320,7 +320,7 @@ class BertForCL(BertPreTrainedModel):
 
         # YYH --
         self.classifier = None
-        self.classifier_input_size = config.hidden_size * 3
+        self.classifier_input_size = config.hidden_size * 4
         self.classifier_model_init()
 
         self.is_classifier_train_time = True
@@ -346,20 +346,19 @@ class BertForCL(BertPreTrainedModel):
                 nn.LeakyReLU(),
             )
 
-    def force_switch_to_classifier(self):
-        self.encoder_counter += (
-                self.training_args.train_encoder_interval
-                - (self.encoder_counter % self.training_args.train_encoder_interval)
-        )
+    def force_switch(self):
+        if self.is_classifier_train_time:
+            self.classifier_counter += (
+                    self.training_args.train_classifier_interval
+                    - (self.classifier_counter % self.training_args.train_classifier_interval)
+            )
+        else:
+            self.encoder_counter += (
+                    self.training_args.train_encoder_interval
+                    - (self.encoder_counter % self.training_args.train_encoder_interval)
+            )
 
-        self.is_classifier_train_time = True
-
-    def force_switch_to_encoder(self):
-        self.classifier_counter += (
-                self.training_args.train_classifier_interval
-                - (self.classifier_counter % self.training_args.train_classifier_interval)
-        )
-        self.is_classifier_train_time = False
+        self.is_classifier_train_time = not self.is_classifier_train_time
 
     def _try_switch(self, counter, interval):
         if counter % interval == 0:

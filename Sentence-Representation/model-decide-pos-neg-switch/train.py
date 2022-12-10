@@ -41,7 +41,7 @@ class ModelArguments:
 
     # Huggingface's original arguments
     model_name_or_path: Optional[str] = field(
-        default='prajjwal1/bert-small',
+        default='bert-base-uncased',
         metadata={
             "help": "The model checkpoint for weights initialization."
                     "Don't set if you want to train a model from scratch."
@@ -149,7 +149,7 @@ class DataTrainingArguments:
         metadata={"help": "The training data file (.txt or .csv)."}
     )
     max_seq_length: Optional[int] = field(
-        default=64,
+        default=32,
         metadata={
             "help": "The maximum total input sequence length after tokenization. Sequences longer "
                     "than this will be truncated."
@@ -546,50 +546,9 @@ def main():
 
         ray.init(log_to_driver=False)
 
-        # Callback code, to let ray-tune run trainer evaluate for test-set at the end of the trial
-        # class EndOfTrialCallback(Callback):
-        #     def on_trial_complete(self, iteration: int, trials: List["Trial"], trial: "Trial", **info):
-        #         # Save best model val-dataset accuracy
-        #         with open(trial.logdir + os.sep + "trial_best_model_val_result.txt", "w") as fp:
-        #             # HF Trainer provided metric from "compute_objective" is saved always as "objective"
-        #             fp.write(str(trial.metric_analysis["objective"][training_args.metric_direction[:3]]))
-        #
-        #         # Run and save best model for test-set accuracy
-        #         checkpoints_dir = None
-        #         for root, dirs, files in os.walk(trial.logdir):
-        #             for directory in dirs:
-        #                 if directory == f"run-{trial.trial_id}":
-        #                     checkpoints_dir = trial.logdir + os.sep + directory
-        #
-        #         best_model_checkpoint = None
-        #         if checkpoints_dir:
-        #             last_checkpoint = sorted(
-        #                 os.listdir(checkpoints_dir),
-        #                 key=lambda dirname: int(dirname.split('-')[1])
-        #             )[-1]
-        #
-        #             trainer_state_path = checkpoints_dir + os.sep + last_checkpoint + os.sep + "trainer_state.json"
-        #             with open(trainer_state_path) as fp:
-        #                 trainer_state = json.load(fp)
-        #                 best_model_checkpoint_tmp = trainer_state['best_model_checkpoint']
-        #                 if "./" == best_model_checkpoint_tmp[:2]:
-        #                     best_model_checkpoint_tmp = best_model_checkpoint_tmp[2:]
-        #                 best_model_checkpoint = trial.logdir + os.sep + best_model_checkpoint_tmp
-        #
-        #         if best_model_checkpoint:
-        #             local_trainer = CLTrainer(
-        #                 model=model_init_impl(best_model_checkpoint),
-        #                 args=training_args,
-        #                 data_collator=data_collator
-        #             )
-        #
-        #             with open(trial.logdir + os.sep + "trial_best_model_test_result.json", "w") as fp:
-        #                 fp.write(str(local_trainer.evaluate(eval_senteval_transfer=True)))
-
         best_run = trainer.hyperparameter_search(
             backend="ray",
             hp_space=lambda _: {
-                # "seed": tune.grid_search(training_args.tune_choice_seed),
                 "classifier_loss_limit": tune.grid_search(training_args.tune_classifier_loss_limit),
                 "pseudo_label_window_range": tune.grid_search(training_args.tune_pseudo_label_window_range),
                 "per_device_train_batch_size": tune.grid_search(training_args.tune_per_device_train_batch_size),
@@ -602,7 +561,6 @@ def main():
             search_alg=BasicVariantGenerator(max_concurrent=training_args.max_concurrent_trials),
             scheduler=FIFOScheduler(),
             log_to_file=True,
-            # callbacks=[EndOfTrialCallback()]
         )
 
         logger.info(f"best_run.run_id/best_run.hyperparameters: [{best_run.run_id}/{best_run.hyperparameters}]")

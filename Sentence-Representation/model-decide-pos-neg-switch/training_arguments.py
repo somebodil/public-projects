@@ -9,6 +9,10 @@ class OurTrainingArguments(TrainingArguments):
     STRATEGY = 'steps'
     STRATEGY_STEPS = 125
 
+    # Model Arguments --
+    classifier_loss_limit: float = field(default=0.1)
+    pseudo_label_window_range: int = field(default=1)
+
     # Trainer Arguments --
     output_dir: str = field(default='./standalone_results')
     overwrite_output_dir: bool = field(default=True)
@@ -39,14 +43,23 @@ class OurTrainingArguments(TrainingArguments):
     eval_transfer: bool = field(default=False)
 
     # Ray Tune Arguments --
-    use_ray: bool = field(default=False)
+    use_ray: bool = field(default=True)
     local_dir: str = field(default='./ray_results/')
     num_samples: int = field(default=1)  # Will be ignored because "tune.grid_search" is used
     metric_direction: str = field(default='maximize')  # Should be 'maximize' or 'minimize'
     max_concurrent_trials: int = field(default=0)
     cpus_per_trial: int = field(default=1)
-    gpus_per_trial: int = field(default=1)
-    tune_choice_seed: List[int] = field(
+    gpus_per_trial: int = field(default=0.3)
+    tune_classifier_loss_limit: List[float] = field(
         default_factory=lambda: [
-            42, 43, 44, 45
+            0.07, 0.08, 0.09, 0.10, 0.11, 0.12
+        ])
+    tune_pseudo_label_window_range: List[int] = field(
+        default_factory=lambda: [
+            0, 1
+        ])
+    tune_per_device_train_batch_size: List[int] = field(
+        default_factory=lambda: [
+            64,
+            # 128, 256, 512
         ])

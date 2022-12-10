@@ -287,6 +287,7 @@ def main():
             model = RobertaForCL.from_pretrained(
                 model_args.model_name_or_path,
                 model_args,
+                training_args,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
                 cache_dir=model_args.cache_dir,
@@ -297,6 +298,7 @@ def main():
             model = BertForCL.from_pretrained(
                 model_args.model_name_or_path,
                 model_args,
+                training_args,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
                 cache_dir=model_args.cache_dir,
@@ -521,6 +523,7 @@ def main():
             return BertForCL.from_pretrained(
                 model_args.model_name_or_path if best_model_checkpoint is None else best_model_checkpoint,
                 model_args,
+                training_args,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
                 cache_dir=model_args.cache_dir,
@@ -544,7 +547,9 @@ def main():
         best_run = trainer.hyperparameter_search(
             backend="ray",
             hp_space=lambda _: {
-                "seed": tune.grid_search(training_args.tune_choice_seed),
+                "classifier_loss_limit": tune.grid_search(training_args.tune_classifier_loss_limit),
+                "pseudo_label_window_range": tune.grid_search(training_args.tune_pseudo_label_window_range),
+                "per_device_train_batch_size": tune.grid_search(training_args.tune_per_device_train_batch_size),
             },
             compute_objective=lambda metrics: metrics[training_args.metric_for_best_model],
             n_trials=training_args.num_samples,

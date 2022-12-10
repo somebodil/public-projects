@@ -22,6 +22,6 @@ python train.py \
     --do_train \
     --do_eval \
     --output_dir exp_result/my-unsup-simcse-bert-base-uncased \
-    --learning_rate 4e-5 \
+    --learning_rate 1e-5 \
     --fp16 \
     "$@"

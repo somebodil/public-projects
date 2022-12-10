@@ -534,7 +534,6 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
-    trainer.model_args = model_args
 
     # Training
     if training_args.do_train:
